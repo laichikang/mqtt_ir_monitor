@@ -63,6 +63,9 @@
             <button id="btn-replay-selected" class="btn btn-primary" disabled>
               ▶ Replay Selected (<span id="selected-count">0</span>)
             </button>
+            <button id="btn-save-as-script" class="btn btn-secondary" disabled>
+              💾 Save as Script
+            </button>
             <button id="btn-cancel-replay" class="btn btn-danger" disabled>
               ⏹ Cancel Replay
             </button>
@@ -133,7 +136,53 @@
           </table>
         </div>
       </section>
+
+      <!-- Action Scripts Panel -->
+      <section class="card scripts-card">
+        <div class="card-header">
+          <h2>Action Scripts</h2>
+          <div class="script-header-actions">
+            <button id="btn-new-script" class="btn btn-primary">+ New Script</button>
+            <button id="btn-import-script" class="btn btn-secondary">Import JSON</button>
+            <input type="file" id="input-import-script" accept=".json,application/json" class="hidden-input">
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="script-targets-bar">
+            <span class="targets-label">Run Targets (concurrent):</span>
+            <div id="script-target-checkboxes" class="script-target-checkboxes">
+              <span class="empty-inline">No devices registered</span>
+            </div>
+          </div>
+          <ul id="scripts-list" class="scripts-list">
+            <li class="empty-state">No action scripts saved yet</li>
+          </ul>
+        </div>
+      </section>
     </main>
+  </div>
+
+  <!-- Visual Script Editor Modal -->
+  <div id="script-editor-modal" class="modal hidden">
+    <div class="modal-content modal-wide">
+      <div class="modal-header">
+        <h3 id="script-editor-title">Action Script Editor</h3>
+        <button id="btn-close-script-editor" class="close-btn">&times;</button>
+      </div>
+      <div class="form-group">
+        <label for="editor-script-name">Script Name:</label>
+        <input type="text" id="editor-script-name" class="form-control" required placeholder="e.g. power_cycle_sequence">
+      </div>
+      <div class="editor-steps-header">
+        <h4>Steps</h4>
+        <button type="button" id="btn-add-step" class="btn btn-secondary">+ Add Step</button>
+      </div>
+      <div id="editor-steps-container" class="editor-steps-container"></div>
+      <div class="modal-footer">
+        <button type="button" id="btn-cancel-script-editor" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="btn-save-script-editor" class="btn btn-primary">Save Script</button>
+      </div>
+    </div>
   </div>
 
   <!-- Settings Modal Dialog -->

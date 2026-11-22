@@ -87,4 +87,25 @@ uv run mypy src
 - `POST /api/replay/cancel` — Cancel active sequence replay.
 - `GET /api/settings/mqtt` — Get current broker settings.
 - `POST /api/settings/mqtt` — Update broker settings and reconnect live.
-- `WS /ws` — Real-time event push stream.
+- `GET /api/scripts` — List all saved Action Scripts.
+- `GET /api/scripts/{name}` — Fetch a saved Action Script by name.
+- `POST /api/scripts` — Create or overwrite a named Action Script (returns HTTP 409 on name conflict unless `overwrite: true`).
+- `POST /api/scripts/from-notifications` — Compile selected IR notifications into a named Action Script with timestamp deltas.
+- `DELETE /api/scripts/{name}` — Delete a saved Action Script.
+- `POST /api/scripts/{name}/run` — Execute a saved Action Script concurrently across multiple target devices with per-device 120 ms minimum pacing.
+- `WS /ws` — Real-time event push stream (`broker_status`, `device_update`, `notification`, `replay_status`, `script_status`).
+
+## Action Scripts
+
+Action Scripts let you save, edit, export/import, and replay ordered device action sequences across one or more devices concurrently.
+
+Supported step types:
+- `sendircode`: `{"type": "sendircode", "prot": 8, "addr": 0, "cmd": 12, "flags": 0, "delay_ms": 0}`
+- `digital`: `{"type": "digital", "pin": 5, "value": 1, "delay_ms": 0}`
+- `clearkeydetail`: `{"type": "clearkeydetail", "delay_ms": 0}`
+- `replaylast`: `{"type": "replaylast", "delay_ms": 0}`
+- `delay`: `{"type": "delay", "delay_ms": 500}`
+
+In the web dashboard:
+- Select notifications and click **Save as Script** to convert them into a named `sendircode` script.
+- Use the **Action Scripts** panel to create, visually edit, export/import JSON, delete, or run scripts concurrently across checked target devices.

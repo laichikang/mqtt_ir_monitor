@@ -31,6 +31,7 @@ class MqttService:
         self._client: mqtt.Client | None = None
         self._last_publish_per_device: dict[str, float] = {}
         self._publish_lock = threading.Lock()
+        self._device_locks: dict[str, threading.Lock] = {}
         self._loop_thread: threading.Thread | None = None
         self._running = False
 
@@ -238,15 +239,21 @@ class MqttService:
         self.settings.mqtt_password = password
         self.start()
 
-    def publish_event(
-        self, target_device_id: str, prot: int, addr: int, cmd: int, flags: int
-    ) -> bool:
-        """Publish sendircode command to target device with ADR-007 pacing."""
+    def _get_device_lock(self, device_id: str) -> threading.Lock:
+        with self._publish_lock:
+            lock = self._device_locks.get(device_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._device_locks[device_id] = lock
+            return lock
+
+    def publish_command(self, target_device_id: str, payload: str) -> bool:
+        """Publish an arbitrary command payload to target device with ADR-007 per-device pacing."""
         prefix = self.settings.mqtt_topic_prefix.rstrip("/")
         topic = f"{prefix}/{target_device_id}/events"
-        payload = f"sendircode?prot={prot}&addr={addr}&cmd={cmd}&flags={flags}"
+        dev_lock = self._get_device_lock(target_device_id)
 
-        with self._publish_lock:
+        with dev_lock:
             # Enforce minimum 120 ms interval per device
             last_time = self._last_publish_per_device.get(target_device_id, 0.0)
             min_gap = self.settings.min_publish_interval_ms / 1000.0
@@ -256,10 +263,16 @@ class MqttService:
 
             if not self._client or not self.connected:
                 logger.warning("Cannot publish: MQTT client is disconnected.")
-                # We update timestamp anyway to keep pacing invariant
                 self._last_publish_per_device[target_device_id] = time.time()
                 return False
 
             result = self._client.publish(topic, payload, qos=1)
             self._last_publish_per_device[target_device_id] = time.time()
             return result.rc == mqtt.MQTT_ERR_SUCCESS
+
+    def publish_event(
+        self, target_device_id: str, prot: int, addr: int, cmd: int, flags: int
+    ) -> bool:
+        """Publish sendircode command to target device with ADR-007 pacing."""
+        payload = f"sendircode?prot={prot}&addr={addr}&cmd={cmd}&flags={flags}"
+        return self.publish_command(target_device_id, payload)

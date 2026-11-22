@@ -453,3 +453,149 @@ body {
   gap: 0.75rem;
   margin-top: 1.5rem;
 }
+
+.modal-wide {
+  width: 760px;
+  max-width: 95vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.hidden-input {
+  display: none;
+}
+
+/* Action Scripts Panel */
+.script-header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.script-targets-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.85rem;
+}
+
+.targets-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.script-target-checkboxes {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.script-target-checkboxes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.empty-inline {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.scripts-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.script-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: rgba(15, 23, 42, 0.45);
+}
+
+.script-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.script-item-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.script-item-meta {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.script-item-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Script Editor Steps */
+.editor-steps-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.editor-steps-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: #0f172a;
+}
+
+.step-row .step-num {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  min-width: 24px;
+}
+
+.step-row .step-small-input {
+  width: 72px;
+}
+
+.step-row .step-fields {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.step-row .step-actions {
+  display: flex;
+  gap: 0.25rem;
+}

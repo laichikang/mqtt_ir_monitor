@@ -6,23 +6,28 @@ import logging
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from mqtt_ir_monitor.config import settings
 from mqtt_ir_monitor.db import (
+    ScriptConflictError,
     clear_notifications,
+    delete_script,
     get_devices,
     get_notifications,
+    get_script_by_name,
     init_db,
+    list_scripts,
+    save_script,
 )
 from mqtt_ir_monitor.mqtt_service import MqttService
 from mqtt_ir_monitor.protocols import get_protocol_label
-from mqtt_ir_monitor.replay import ReplayEngine
+from mqtt_ir_monitor.replay import ReplayEngine, compile_notifications_to_steps
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mqtt_ir_monitor.app")
@@ -105,6 +110,65 @@ class MqttSettingsRequest(BaseModel):
     port: int = 1883
     username: str | None = None
     password: str | None = None
+
+
+class ActionStepModel(BaseModel):
+    type: Literal["sendircode", "digital", "clearkeydetail", "replaylast", "delay"]
+    delay_ms: int = Field(default=0, ge=0)
+    prot: int | None = None
+    addr: int | None = None
+    cmd: int | None = None
+    flags: int | None = None
+    pin: int | None = None
+    value: Literal[0, 1] | None = None
+
+    @model_validator(mode="after")
+    def validate_step_fields(self) -> "ActionStepModel":
+        if self.type == "sendircode":
+            if self.prot is None or self.addr is None or self.cmd is None:
+                raise ValueError("sendircode step requires prot, addr, and cmd.")
+            if self.flags is None:
+                self.flags = 0
+        elif self.type == "digital" and (self.pin is None or self.value is None):
+            raise ValueError("digital step requires pin and value (0 or 1).")
+        return self
+
+    def to_step_dict(self) -> dict[str, Any]:
+        if self.type == "sendircode":
+            return {
+                "type": "sendircode",
+                "prot": self.prot,
+                "addr": self.addr,
+                "cmd": self.cmd,
+                "flags": self.flags if self.flags is not None else 0,
+                "delay_ms": self.delay_ms,
+            }
+        if self.type == "digital":
+            return {
+                "type": "digital",
+                "pin": self.pin,
+                "value": self.value,
+                "delay_ms": self.delay_ms,
+            }
+        return {"type": self.type, "delay_ms": self.delay_ms}
+
+
+class ScriptSaveRequest(BaseModel):
+    name: str = Field(min_length=1)
+    steps: list[ActionStepModel]
+    overwrite: bool = False
+
+
+class ScriptFromNotificationsRequest(BaseModel):
+    name: str = Field(min_length=1)
+    notification_ids: list[int]
+    max_delay_ms: int = Field(default=5000, ge=0)
+    overwrite: bool = False
+
+
+class ScriptRunRequest(BaseModel):
+    target_device_ids: list[str]
+    speed: float = Field(default=1.0, ge=0.1, le=5.0)
 
 
 @app.get("/")
@@ -201,9 +265,116 @@ async def api_replay_sequence(req: ReplaySequenceRequest) -> dict[str, Any]:
 
 @app.post("/api/replay/cancel")
 async def api_replay_cancel() -> dict[str, Any]:
-    """Cancel active sequence replay."""
+    """Cancel active sequence replay or script execution."""
     replay_engine.cancel()
     return {"status": "cancelled"}
+
+
+@app.get("/api/scripts")
+async def api_list_scripts() -> dict[str, Any]:
+    """List all saved action scripts."""
+    scripts = list_scripts(settings.db_path)
+    return {"scripts": scripts}
+
+
+@app.get("/api/scripts/{name}")
+async def api_get_script(name: str) -> dict[str, Any]:
+    """Fetch a single saved action script by name."""
+    script = get_script_by_name(settings.db_path, name)
+    if not script:
+        raise HTTPException(status_code=404, detail=f"Script '{name}' not found.")
+    return script
+
+
+@app.post("/api/scripts", response_model=None)
+async def api_save_script(req: ScriptSaveRequest, response: Response) -> dict[str, Any] | Response:
+    """Create or overwrite a named action script."""
+    clean_name = req.name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Script name cannot be empty.")
+    steps = [s.to_step_dict() for s in req.steps]
+    try:
+        script, created = save_script(
+            db_path=settings.db_path,
+            name=clean_name,
+            steps=steps,
+            overwrite=req.overwrite,
+        )
+    except ScriptConflictError:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Script name already exists", "conflict": True},
+        )
+    response.status_code = 201 if created else 200
+    return script
+
+
+@app.post("/api/scripts/from-notifications", response_model=None)
+async def api_save_script_from_notifications(
+    req: ScriptFromNotificationsRequest, response: Response
+) -> dict[str, Any] | Response:
+    """Compile selected IR notifications into a named action script."""
+    clean_name = req.name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Script name cannot be empty.")
+    if not req.notification_ids:
+        raise HTTPException(status_code=400, detail="notification_ids cannot be empty.")
+    steps = compile_notifications_to_steps(
+        db_path=settings.db_path,
+        notification_ids=req.notification_ids,
+        max_delay_ms=req.max_delay_ms,
+    )
+    if not steps:
+        raise HTTPException(
+            status_code=400, detail="No valid IR notifications found in selection."
+        )
+    try:
+        script, created = save_script(
+            db_path=settings.db_path,
+            name=clean_name,
+            steps=steps,
+            overwrite=req.overwrite,
+        )
+    except ScriptConflictError:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Script name already exists", "conflict": True},
+        )
+    response.status_code = 201 if created else 200
+    return script
+
+
+@app.delete("/api/scripts/{name}")
+async def api_delete_script(name: str) -> dict[str, Any]:
+    """Delete a saved action script by name."""
+    deleted = delete_script(settings.db_path, name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Script '{name}' not found.")
+    return {"status": "ok", "deleted": True, "name": name}
+
+
+@app.post("/api/scripts/{name}/run")
+async def api_run_script(name: str, req: ScriptRunRequest) -> dict[str, Any]:
+    """Execute a saved action script concurrently across target devices."""
+    script = get_script_by_name(settings.db_path, name)
+    if not script:
+        raise HTTPException(status_code=404, detail=f"Script '{name}' not found.")
+    targets = [t.strip() for t in req.target_device_ids if t.strip()]
+    if not targets:
+        raise HTTPException(status_code=400, detail="target_device_ids cannot be empty.")
+    replay_engine.start_script(
+        script_name=script["name"],
+        steps=script["steps"],
+        target_device_ids=targets,
+        speed=req.speed,
+    )
+    return {
+        "status": "started",
+        "script_name": script["name"],
+        "step_count": script["step_count"],
+        "target_device_ids": targets,
+        "speed": req.speed,
+    }
 
 
 @app.get("/api/settings/mqtt")
