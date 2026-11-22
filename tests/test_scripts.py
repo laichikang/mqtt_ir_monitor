@@ -127,9 +127,8 @@ def test_compile_notifications_to_steps(temp_db_path):
         raw_payload='{"return_value":0}',
     )
 
-    steps = compile_notifications_to_steps(
-        temp_db_path, [id3, id1, id_reply, id2], max_delay_ms=5000
-    )
+    # Default: no 5000ms clamp, preserves full 10000ms delta
+    steps = compile_notifications_to_steps(temp_db_path, [id3, id1, id_reply, id2])
     assert len(steps) == 3
     assert steps[0] == {
         "type": "sendircode",
@@ -142,7 +141,13 @@ def test_compile_notifications_to_steps(temp_db_path):
     assert steps[1]["cmd"] == 20
     assert steps[1]["delay_ms"] == 350
     assert steps[2]["cmd"] == 30
-    assert steps[2]["delay_ms"] == 5000  # Clamped from 10000 ms
+    assert steps[2]["delay_ms"] == 10000
+
+    # Optional explicit max_delay_ms still clamps when passed
+    clamped = compile_notifications_to_steps(
+        temp_db_path, [id3, id1, id_reply, id2], max_delay_ms=5000
+    )
+    assert clamped[2]["delay_ms"] == 5000
 
 
 @pytest.mark.asyncio

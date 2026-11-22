@@ -162,7 +162,7 @@ class ScriptSaveRequest(BaseModel):
 class ScriptFromNotificationsRequest(BaseModel):
     name: str = Field(min_length=1)
     notification_ids: list[int]
-    max_delay_ms: int = Field(default=5000, ge=0)
+    max_delay_ms: int | None = Field(default=None, ge=0)
     overwrite: bool = False
 
 

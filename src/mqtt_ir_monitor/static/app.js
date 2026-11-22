@@ -624,7 +624,6 @@ btnSaveAsScript.addEventListener("click", async () => {
       body: JSON.stringify({
         name: name.trim(),
         notification_ids: ids,
-        max_delay_ms: 5000,
         overwrite,
       }),
     });

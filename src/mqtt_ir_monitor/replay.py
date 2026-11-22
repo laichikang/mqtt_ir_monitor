@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def compile_notifications_to_steps(
-    db_path: str, notification_ids: list[int], max_delay_ms: int = 5000
+    db_path: str, notification_ids: list[int], max_delay_ms: int | None = None
 ) -> list[dict[str, Any]]:
     """Convert selected IR notifications into ordered sendircode action steps."""
     items = get_notifications_by_ids(db_path, notification_ids)
@@ -31,7 +31,7 @@ def compile_notifications_to_steps(
             delay_ms = 0
         else:
             raw_delta = max(0, curr_ms - prev_ms)
-            delay_ms = max(0, min(max_delay_ms, raw_delta))
+            delay_ms = min(max_delay_ms, raw_delta) if max_delay_ms is not None else raw_delta
         prev_ms = curr_ms
         steps.append(
             {
