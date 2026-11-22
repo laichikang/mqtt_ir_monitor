@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MQTT IR Device Monitor & Replay</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="icon">📡</span>
+      <h1>MQTT IR Device Monitor</h1>
+    </div>
+    <div class="broker-info">
+      <span class="status-indicator" id="broker-indicator">
+        <span class="dot"></span>
+        <span id="broker-status-text">Disconnected</span>
+      </span>
+      <span class="broker-addr" id="broker-addr-text">192.168.20.38:1883</span>
+      <button id="btn-open-settings" class="btn btn-secondary">⚙ Settings</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="main-layout">
+    <!-- Left Sidebar: Devices Panel -->
+    <aside class="sidebar">
+      <div class="card devices-card">
+        <div class="card-header">
+          <h2>Registered Devices</h2>
+          <div class="device-stats">
+            <span class="badge badge-success" id="stat-online-count">Online: 0</span>
+            <span class="badge badge-secondary" id="stat-total-count">Total: 0</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <ul id="device-list" class="device-list">
+            <li class="empty-state">No devices registered yet</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area: Notifications & Replay -->
+    <main class="content-area">
+      <!-- Replay Controls Toolbar -->
+      <section class="card replay-bar">
+        <div class="replay-controls">
+          <div class="control-group">
+            <label for="select-target-device">Target Device:</label>
+            <select id="select-target-device" class="form-control">
+              <option value="">-- Choose Target --</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="input-replay-speed">Speed:</label>
+            <input type="number" id="input-replay-speed" class="form-control speed-input" min="0.1" max="5.0" step="0.1" value="1.0">
+            <span class="unit">x</span>
+          </div>
+          <div class="control-group">
+            <button id="btn-replay-selected" class="btn btn-primary" disabled>
+              ▶ Replay Selected (<span id="selected-count">0</span>)
+            </button>
+            <button id="btn-cancel-replay" class="btn btn-danger" disabled>
+              ⏹ Cancel Replay
+            </button>
+          </div>
+        </div>
+        <div id="replay-progress-box" class="replay-progress-box hidden">
+          <div class="progress-bar-container">
+            <div id="replay-progress-bar" class="progress-bar" style="width: 0%"></div>
+          </div>
+          <div id="replay-status-message" class="status-msg">Ready</div>
+        </div>
+      </section>
+
+      <!-- Notifications Feed Panel -->
+      <section class="card feed-card">
+        <div class="card-header feed-header">
+          <div class="filters-row">
+            <div class="filter-item">
+              <label for="filter-device">Device:</label>
+              <select id="filter-device" class="form-control">
+                <option value="">All Devices</option>
+              </select>
+            </div>
+            <div class="filter-item">
+              <label for="filter-event">Event:</label>
+              <select id="filter-event" class="form-control">
+                <option value="">All Events</option>
+                <option value="ir_rx">ir_rx</option>
+                <option value="ir_tx">ir_tx</option>
+                <option value="reply">reply</option>
+                <option value="other">other</option>
+              </select>
+            </div>
+            <div class="filter-item checkbox-item">
+              <label>
+                <input type="checkbox" id="check-hide-noise" checked>
+                Hide protocol-2 noise
+              </label>
+            </div>
+            <div class="filter-item actions-item">
+              <button id="btn-clear-history" class="btn btn-outline-danger">Clear History</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-body table-responsive">
+          <table class="data-table" id="table-notifications">
+            <thead>
+              <tr>
+                <th style="width: 40px;">
+                  <input type="checkbox" id="select-all-notifications" title="Select all visible">
+                </th>
+                <th>Time (UTC)</th>
+                <th>Device</th>
+                <th>Event</th>
+                <th>Protocol</th>
+                <th>Addr</th>
+                <th>Cmd</th>
+                <th>Flags</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="notifications-tbody">
+              <tr>
+                <td colspan="9" class="empty-state">No notifications recorded</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Settings Modal Dialog -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>MQTT Broker Configuration</h3>
+        <button id="btn-close-settings" class="close-btn">&times;</button>
+      </div>
+      <form id="form-settings">
+        <div class="form-group">
+          <label for="setting-host">Broker Host:</label>
+          <input type="text" id="setting-host" class="form-control" required placeholder="192.168.20.38">
+        </div>
+        <div class="form-group">
+          <label for="setting-port">Port:</label>
+          <input type="number" id="setting-port" class="form-control" required placeholder="1883" value="1883">
+        </div>
+        <div class="form-group">
+          <label for="setting-username">Username (Optional):</label>
+          <input type="text" id="setting-username" class="form-control" placeholder="Leave empty if none">
+        </div>
+        <div class="form-group">
+          <label for="setting-password">Password (Optional):</label>
+          <input type="password" id="setting-password" class="form-control" placeholder="Leave empty if none">
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="btn-cancel-settings" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save & Reconnect</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
