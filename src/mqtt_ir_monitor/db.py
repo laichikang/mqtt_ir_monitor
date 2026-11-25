@@ -1,9 +1,14 @@
 """SQLite database operations and persistence for MQTT IR Monitor."""
 
+import json
 import os
 import sqlite3
 from datetime import UTC, datetime
 from typing import Any
+
+
+class ScriptConflictError(Exception):
+    """Raised when saving a script with a name that already exists without overwrite."""
 
 
 def get_db_connection(db_path: str) -> sqlite3.Connection:
@@ -56,6 +61,17 @@ def init_db(db_path: str) -> None:
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_notifications_prot ON notifications(prot);"
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scripts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                steps_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
         )
         conn.commit()
 
@@ -277,5 +293,105 @@ def clear_notifications(db_path: str, device_id: str | None = None) -> int:
             cursor.execute("DELETE FROM notifications;")
             deleted = cursor.rowcount
             cursor.execute("UPDATE devices SET notification_count = 0;")
+        conn.commit()
+        return deleted
+
+
+def _row_to_script(row: sqlite3.Row) -> dict[str, Any]:
+    """Convert a SQLite scripts row to a dictionary with parsed steps."""
+    steps = json.loads(row["steps_json"])
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "step_count": len(steps),
+        "steps": steps,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def list_scripts(db_path: str) -> list[dict[str, Any]]:
+    """Return all saved action scripts ordered by updated_at descending."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, name, steps_json, created_at, updated_at
+            FROM scripts
+            ORDER BY updated_at DESC, name ASC;
+            """
+        )
+        return [_row_to_script(row) for row in cursor.fetchall()]
+
+
+def get_script_by_name(db_path: str, name: str) -> dict[str, Any] | None:
+    """Fetch a single saved script by unique name."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, name, steps_json, created_at, updated_at
+            FROM scripts
+            WHERE name = ?;
+            """,
+            (name,),
+        )
+        row = cursor.fetchone()
+        return _row_to_script(row) if row else None
+
+
+def save_script(
+    db_path: str,
+    name: str,
+    steps: list[dict[str, Any]],
+    overwrite: bool = False,
+) -> tuple[dict[str, Any], bool]:
+    """Create or overwrite a named action script. Returns (script_dict, created)."""
+    now_iso = datetime.now(UTC).isoformat()
+    steps_json = json.dumps(steps)
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM scripts WHERE name = ?;", (name,))
+        existing = cursor.fetchone()
+        if existing:
+            if not overwrite:
+                raise ScriptConflictError(f"Script '{name}' already exists.")
+            cursor.execute(
+                """
+                UPDATE scripts
+                SET steps_json = ?, updated_at = ?
+                WHERE name = ?;
+                """,
+                (steps_json, now_iso, name),
+            )
+            created = False
+        else:
+            cursor.execute(
+                """
+                INSERT INTO scripts (name, steps_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (name, steps_json, now_iso, now_iso),
+            )
+            created = True
+        conn.commit()
+        cursor.execute(
+            """
+            SELECT id, name, steps_json, created_at, updated_at
+            FROM scripts
+            WHERE name = ?;
+            """,
+            (name,),
+        )
+        row = cursor.fetchone()
+        return _row_to_script(row), created
+
+
+def delete_script(db_path: str, name: str) -> bool:
+    """Delete a saved script by name. Returns True if a row was deleted."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM scripts WHERE name = ?;", (name,))
+        deleted = cursor.rowcount > 0
         conn.commit()
         return deleted

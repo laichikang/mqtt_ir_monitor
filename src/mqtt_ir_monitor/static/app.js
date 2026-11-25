@@ -22,7 +22,29 @@ const selectAllCheckbox = document.getElementById("select-all-notifications");
 const selectTargetDeviceEl = document.getElementById("select-target-device");
 const inputReplaySpeed = document.getElementById("input-replay-speed");
 const btnReplaySelected = document.getElementById("btn-replay-selected");
+const btnSaveAsScript = document.getElementById("btn-save-as-script");
 const btnCancelReplay = document.getElementById("btn-cancel-replay");
+
+// Action Scripts DOM Elements
+const scriptsListEl = document.getElementById("scripts-list");
+const scriptTargetCheckboxesEl = document.getElementById("script-target-checkboxes");
+const btnNewScript = document.getElementById("btn-new-script");
+const btnImportScript = document.getElementById("btn-import-script");
+const inputImportScript = document.getElementById("input-import-script");
+
+// Script Editor Modal Elements
+const scriptEditorModal = document.getElementById("script-editor-modal");
+const scriptEditorTitle = document.getElementById("script-editor-title");
+const editorScriptName = document.getElementById("editor-script-name");
+const editorStepsContainer = document.getElementById("editor-steps-container");
+const btnAddStep = document.getElementById("btn-add-step");
+const btnCloseScriptEditor = document.getElementById("btn-close-script-editor");
+const btnCancelScriptEditor = document.getElementById("btn-cancel-script-editor");
+const btnSaveScriptEditor = document.getElementById("btn-save-script-editor");
+
+let savedScripts = [];
+let selectedScriptTargets = new Set();
+let editorSteps = [];
 const selectedCountEl = document.getElementById("selected-count");
 const replayProgressBox = document.getElementById("replay-progress-box");
 const replayProgressBar = document.getElementById("replay-progress-bar");
@@ -129,6 +151,9 @@ function renderDevices(devices, total, online) {
 
   filterDeviceEl.value = activeFilterDeviceId;
 
+  // Render multi-device checkboxes for Action Scripts
+  renderScriptTargetCheckboxes(devices);
+
   // Render left sidebar list
   if (devices.length === 0) {
     deviceListEl.innerHTML = '<li class="empty-state">No devices registered yet</li>';
@@ -233,6 +258,7 @@ function updateSelectionState() {
   const count = selectedNotificationIds.size;
   selectedCountEl.textContent = count;
   btnReplaySelected.disabled = count === 0 || !selectTargetDeviceEl.value;
+  btnSaveAsScript.disabled = count === 0;
 
   const visibleCheckboxes = document.querySelectorAll(".notif-select");
   if (visibleCheckboxes.length > 0) {
@@ -412,7 +438,7 @@ function handleWsMessage(msg) {
   } else if (msg.type === "history_cleared") {
     fetchDevices();
     fetchNotifications();
-  } else if (msg.type === "replay_status") {
+  } else if (msg.type === "replay_status" || msg.type === "script_status") {
     const data = msg.data;
     replayProgressBox.classList.remove("hidden");
     replayStatusMessage.textContent = data.message || data.status;
@@ -432,7 +458,322 @@ function handleWsMessage(msg) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Action Scripts: List, Save from Notifications, Visual Editor, Import/Export
+// ---------------------------------------------------------------------------
+
+function renderScriptTargetCheckboxes(devices) {
+  if (!devices || devices.length === 0) {
+    scriptTargetCheckboxesEl.innerHTML = '<span class="empty-inline">No devices registered</span>';
+    return;
+  }
+  const existingIds = new Set(devices.map((d) => d.device_id));
+  for (const id of Array.from(selectedScriptTargets)) {
+    if (!existingIds.has(id)) selectedScriptTargets.delete(id);
+  }
+  if (selectedScriptTargets.size === 0) {
+    devices.filter((d) => d.online === 1).forEach((d) => selectedScriptTargets.add(d.device_id));
+  }
+
+  scriptTargetCheckboxesEl.innerHTML = "";
+  devices.forEach((dev) => {
+    const label = document.createElement("label");
+    const checked = selectedScriptTargets.has(dev.device_id) ? "checked" : "";
+    label.innerHTML = `
+      <input type="checkbox" class="script-target-cb" value="${dev.device_id}" ${checked}>
+      <span>${dev.device_id} ${dev.online ? "(Online)" : "(Offline)"}</span>
+    `;
+    const cb = label.querySelector("input");
+    cb.addEventListener("change", (e) => {
+      if (e.target.checked) selectedScriptTargets.add(dev.device_id);
+      else selectedScriptTargets.delete(dev.device_id);
+    });
+    scriptTargetCheckboxesEl.appendChild(label);
+  });
+}
+
+async function fetchScripts() {
+  try {
+    const res = await fetch("/api/scripts");
+    if (!res.ok) return;
+    const data = await res.json();
+    savedScripts = data.scripts || [];
+    renderScripts();
+  } catch (err) {
+    console.error("Failed to fetch scripts:", err);
+  }
+}
+
+function renderScripts() {
+  if (!savedScripts || savedScripts.length === 0) {
+    scriptsListEl.innerHTML = '<li class="empty-state">No action scripts saved yet</li>';
+    return;
+  }
+  scriptsListEl.innerHTML = "";
+  savedScripts.forEach((script) => {
+    const li = document.createElement("li");
+    li.className = "script-item";
+    li.innerHTML = `
+      <div class="script-item-info">
+        <span class="script-item-name">${script.name}</span>
+        <span class="script-item-meta">${script.step_count} step(s) &middot; Updated ${formatTime(script.updated_at)}</span>
+      </div>
+      <div class="script-item-actions">
+        <button class="btn btn-primary btn-run-script" data-name="${script.name}">▶ Run</button>
+        <button class="btn btn-secondary btn-edit-script" data-name="${script.name}">Edit</button>
+        <button class="btn btn-secondary btn-export-script" data-name="${script.name}">Export JSON</button>
+        <button class="btn btn-outline-danger btn-delete-script" data-name="${script.name}">Delete</button>
+      </div>
+    `;
+    scriptsListEl.appendChild(li);
+  });
+
+  document.querySelectorAll(".btn-run-script").forEach((btn) => {
+    btn.addEventListener("click", () => runSavedScript(btn.dataset.name));
+  });
+  document.querySelectorAll(".btn-edit-script").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const s = savedScripts.find((item) => item.name === btn.dataset.name);
+      if (s) openScriptEditor(s.name, s.steps);
+    });
+  });
+  document.querySelectorAll(".btn-export-script").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const s = savedScripts.find((item) => item.name === btn.dataset.name);
+      if (!s) return;
+      const blob = new Blob([JSON.stringify({ name: s.name, steps: s.steps }, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${s.name}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  });
+  document.querySelectorAll(".btn-delete-script").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const name = btn.dataset.name;
+      if (!confirm(`Delete action script "${name}"?`)) return;
+      const res = await fetch(`/api/scripts/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (res.ok) fetchScripts();
+    });
+  });
+}
+
+async function runSavedScript(name) {
+  const targets = Array.from(selectedScriptTargets);
+  if (targets.length === 0) {
+    alert("Please select at least one target device in the Action Scripts panel.");
+    return;
+  }
+  const speed = parseFloat(inputReplaySpeed.value) || 1.0;
+  try {
+    const res = await fetch(`/api/scripts/${encodeURIComponent(name)}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_device_ids: targets, speed: speed }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert(`Run script error: ${err.detail || "Failed"}`);
+      return;
+    }
+    isReplaying = true;
+    btnCancelReplay.disabled = false;
+    replayProgressBox.classList.remove("hidden");
+    replayProgressBar.style.width = "0%";
+    replayStatusMessage.textContent = `Running script '${name}' on ${targets.length} device(s)...`;
+  } catch (err) {
+    alert(`Run script failed: ${err}`);
+  }
+}
+
+async function saveScriptPayload(name, steps, overwrite = false) {
+  const res = await fetch("/api/scripts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, steps, overwrite }),
+  });
+  if (res.status === 409 && !overwrite) {
+    if (confirm(`Script "${name}" already exists. Overwrite it?`)) {
+      return saveScriptPayload(name, steps, true);
+    }
+    return false;
+  }
+  if (!res.ok) {
+    const err = await res.json();
+    alert(`Save script error: ${err.detail || "Failed"}`);
+    return false;
+  }
+  await fetchScripts();
+  return true;
+}
+
+btnSaveAsScript.addEventListener("click", async () => {
+  const ids = Array.from(selectedNotificationIds);
+  if (ids.length === 0) return;
+  const name = prompt("Enter a name for this Action Script:");
+  if (!name || !name.trim()) return;
+
+  async function submitFromNotifications(overwrite) {
+    const res = await fetch("/api/scripts/from-notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        notification_ids: ids,
+        overwrite,
+      }),
+    });
+    if (res.status === 409 && !overwrite) {
+      if (confirm(`Script "${name.trim()}" already exists. Overwrite it?`)) {
+        return submitFromNotifications(true);
+      }
+      return;
+    }
+    if (!res.ok) {
+      const err = await res.json();
+      alert(`Save as Script error: ${err.detail || "Failed"}`);
+      return;
+    }
+    await fetchScripts();
+  }
+
+  await submitFromNotifications(false);
+});
+
+// Visual Script Editor
+function defaultStepForType(type) {
+  if (type === "sendircode") return { type: "sendircode", prot: 8, addr: 0, cmd: 0, flags: 0, delay_ms: 0 };
+  if (type === "digital") return { type: "digital", pin: 5, value: 1, delay_ms: 0 };
+  if (type === "delay") return { type: "delay", delay_ms: 500 };
+  return { type, delay_ms: 0 };
+}
+
+function openScriptEditor(name = "", steps = []) {
+  scriptEditorTitle.textContent = name ? `Edit Script: ${name}` : "New Action Script";
+  editorScriptName.value = name;
+  editorSteps = steps.length > 0 ? steps.map((s) => ({ ...s })) : [defaultStepForType("sendircode")];
+  renderEditorSteps();
+  scriptEditorModal.classList.remove("hidden");
+}
+
+function closeScriptEditor() {
+  scriptEditorModal.classList.add("hidden");
+}
+
+function renderEditorSteps() {
+  editorStepsContainer.innerHTML = "";
+  editorSteps.forEach((step, idx) => {
+    const row = document.createElement("div");
+    row.className = "step-row";
+
+    let fieldsHtml = "";
+    if (step.type === "sendircode") {
+      fieldsHtml = `
+        <label>prot <input type="number" class="form-control step-small-input" data-field="prot" value="${step.prot ?? 8}"></label>
+        <label>addr <input type="number" class="form-control step-small-input" data-field="addr" value="${step.addr ?? 0}"></label>
+        <label>cmd <input type="number" class="form-control step-small-input" data-field="cmd" value="${step.cmd ?? 0}"></label>
+        <label>flags <input type="number" class="form-control step-small-input" data-field="flags" value="${step.flags ?? 0}"></label>
+      `;
+    } else if (step.type === "digital") {
+      fieldsHtml = `
+        <label>pin <input type="number" class="form-control step-small-input" data-field="pin" value="${step.pin ?? 5}"></label>
+        <label>val <select class="form-control" data-field="value">
+          <option value="0" ${step.value === 0 ? "selected" : ""}>0 (LOW)</option>
+          <option value="1" ${step.value !== 0 ? "selected" : ""}>1 (HIGH)</option>
+        </select></label>
+      `;
+    }
+
+    row.innerHTML = `
+      <span class="step-num">#${idx + 1}</span>
+      <select class="form-control step-type-select">
+        <option value="sendircode" ${step.type === "sendircode" ? "selected" : ""}>sendircode</option>
+        <option value="digital" ${step.type === "digital" ? "selected" : ""}>digital</option>
+        <option value="clearkeydetail" ${step.type === "clearkeydetail" ? "selected" : ""}>clearkeydetail</option>
+        <option value="replaylast" ${step.type === "replaylast" ? "selected" : ""}>replaylast</option>
+        <option value="delay" ${step.type === "delay" ? "selected" : ""}>delay</option>
+      </select>
+      <div class="step-fields">
+        ${fieldsHtml}
+        <label>delay_ms <input type="number" min="0" class="form-control step-small-input" data-field="delay_ms" value="${step.delay_ms ?? 0}"></label>
+      </div>
+      <div class="step-actions">
+        <button type="button" class="btn btn-secondary btn-step-up" ${idx === 0 ? "disabled" : ""}>↑</button>
+        <button type="button" class="btn btn-secondary btn-step-down" ${idx === editorSteps.length - 1 ? "disabled" : ""}>↓</button>
+        <button type="button" class="btn btn-outline-danger btn-step-del">✕</button>
+      </div>
+    `;
+
+    row.querySelector(".step-type-select").addEventListener("change", (e) => {
+      editorSteps[idx] = defaultStepForType(e.target.value);
+      renderEditorSteps();
+    });
+    row.querySelectorAll("[data-field]").forEach((input) => {
+      input.addEventListener("change", (e) => {
+        editorSteps[idx][e.target.dataset.field] = parseInt(e.target.value, 10) || 0;
+      });
+    });
+    row.querySelector(".btn-step-up").addEventListener("click", () => {
+      if (idx > 0) {
+        [editorSteps[idx - 1], editorSteps[idx]] = [editorSteps[idx], editorSteps[idx - 1]];
+        renderEditorSteps();
+      }
+    });
+    row.querySelector(".btn-step-down").addEventListener("click", () => {
+      if (idx < editorSteps.length - 1) {
+        [editorSteps[idx + 1], editorSteps[idx]] = [editorSteps[idx], editorSteps[idx + 1]];
+        renderEditorSteps();
+      }
+    });
+    row.querySelector(".btn-step-del").addEventListener("click", () => {
+      editorSteps.splice(idx, 1);
+      renderEditorSteps();
+    });
+
+    editorStepsContainer.appendChild(row);
+  });
+}
+
+btnNewScript.addEventListener("click", () => openScriptEditor("", []));
+btnCloseScriptEditor.addEventListener("click", closeScriptEditor);
+btnCancelScriptEditor.addEventListener("click", closeScriptEditor);
+btnAddStep.addEventListener("click", () => {
+  editorSteps.push(defaultStepForType("sendircode"));
+  renderEditorSteps();
+});
+btnSaveScriptEditor.addEventListener("click", async () => {
+  const name = editorScriptName.value.trim();
+  if (!name) {
+    alert("Please enter a script name.");
+    return;
+  }
+  const ok = await saveScriptPayload(name, editorSteps, false);
+  if (ok) closeScriptEditor();
+});
+
+btnImportScript.addEventListener("click", () => inputImportScript.click());
+inputImportScript.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const name = (parsed.name || file.name.replace(/\.json$/i, "")).trim();
+    const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
+    await saveScriptPayload(name, steps, false);
+  } catch (err) {
+    alert(`Invalid JSON file: ${err}`);
+  } finally {
+    inputImportScript.value = "";
+  }
+});
+
 // Initial bootstrap
 fetchDevices();
 fetchNotifications();
+fetchScripts();
 connectWebSocket();
