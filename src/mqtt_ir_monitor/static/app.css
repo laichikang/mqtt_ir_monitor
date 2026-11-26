@@ -599,7 +599,6 @@ body {
   display: flex;
   gap: 0.25rem;
 }
-
 /* Live Device Recording Bar */
 .recording-bar {
   padding: 0.85rem 1rem;

@@ -217,8 +217,6 @@ class RecordingStopRequest(BaseModel):
     name: str | None = None
     overwrite: bool = False
     save: bool = True
-
-
 @app.get("/")
 async def root() -> FileResponse:
     """Serve the dashboard index.html."""
