@@ -24,9 +24,11 @@ class MqttService:
         self,
         settings: Settings,
         on_broadcast: Callable[[dict[str, Any]], Any] | None = None,
+        on_notification: Callable[[dict[str, Any]], Any] | None = None,
     ) -> None:
         self.settings = settings
         self.on_broadcast = on_broadcast
+        self.on_notification = on_notification
         self.connected = False
         self._client: mqtt.Client | None = None
         self._last_publish_per_device: dict[str, float] = {}
@@ -183,6 +185,11 @@ class MqttService:
                 "raw_payload": payload_str,
             }
             self._broadcast({"type": "notification", "data": notif_data})
+            if self.on_notification:
+                try:
+                    self.on_notification(notif_data)
+                except Exception as e:  # noqa: BLE001
+                    logger.error("Error in notification hook: %s", e)
 
     def start(self) -> None:
         """Start MQTT client and background processing loop."""

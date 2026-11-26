@@ -27,6 +27,11 @@ from mqtt_ir_monitor.db import (
 )
 from mqtt_ir_monitor.mqtt_service import MqttService
 from mqtt_ir_monitor.protocols import get_protocol_label
+from mqtt_ir_monitor.recording import (
+    RecordingActiveError,
+    RecordingEngine,
+    RecordingNotActiveError,
+)
 from mqtt_ir_monitor.replay import ReplayEngine, compile_notifications_to_steps
 
 logging.basicConfig(level=logging.INFO)
@@ -52,12 +57,13 @@ async def broadcast_ws(message: dict[str, Any]) -> None:
 
 mqtt_service: MqttService
 replay_engine: ReplayEngine
+recording_engine: RecordingEngine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup and shutdown lifecycle manager."""
-    global mqtt_service, replay_engine
+    global mqtt_service, replay_engine, recording_engine
     init_db(settings.db_path)
 
     main_loop = asyncio.get_running_loop()
@@ -66,8 +72,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         with suppress(RuntimeError):
             asyncio.run_coroutine_threadsafe(broadcast_ws(message), main_loop)
 
-    # Initialize MQTT and Replay engine
-    mqtt_service = MqttService(settings=settings, on_broadcast=dispatch_ws)
+    # Initialize Recording, MQTT, and Replay engines
+    recording_engine = RecordingEngine(on_broadcast=dispatch_ws)
+    mqtt_service = MqttService(
+        settings=settings,
+        on_broadcast=dispatch_ws,
+        on_notification=recording_engine.handle_notification,
+    )
     replay_engine = ReplayEngine(
         mqtt_service=mqtt_service,
         db_path=settings.db_path,
@@ -78,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
+        recording_engine.cancel()
         replay_engine.cancel()
         mqtt_service.stop()
         logger.info("Application shutdown complete.")
@@ -169,6 +181,18 @@ class ScriptFromNotificationsRequest(BaseModel):
 class ScriptRunRequest(BaseModel):
     target_device_ids: list[str]
     speed: float = Field(default=1.0, ge=0.1, le=5.0)
+
+
+class RecordingStartRequest(BaseModel):
+    device_id: str
+    include_tx: bool = False
+    hide_noise: bool = True
+
+
+class RecordingStopRequest(BaseModel):
+    name: str | None = None
+    overwrite: bool = False
+    save: bool = True
 
 
 @app.get("/")
@@ -375,6 +399,52 @@ async def api_run_script(name: str, req: ScriptRunRequest) -> dict[str, Any]:
         "target_device_ids": targets,
         "speed": req.speed,
     }
+
+
+@app.get("/api/recording/status")
+async def api_recording_status() -> dict[str, Any]:
+    """Return current live device recording state."""
+    return recording_engine.get_status()
+
+
+@app.post("/api/recording/start")
+async def api_recording_start(req: RecordingStartRequest) -> dict[str, Any]:
+    """Start live IR recording from an assigned input device."""
+    try:
+        return recording_engine.start(
+            device_id=req.device_id,
+            include_tx=req.include_tx,
+            hide_noise=req.hide_noise,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RecordingActiveError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+
+@app.post("/api/recording/stop", response_model=None)
+async def api_recording_stop(req: RecordingStopRequest) -> dict[str, Any] | Response:
+    """Stop live recording, optionally saving captured steps as an Action Script."""
+    try:
+        return recording_engine.stop(
+            db_path=settings.db_path,
+            name=req.name,
+            overwrite=req.overwrite,
+            save=req.save,
+        )
+    except (RecordingNotActiveError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ScriptConflictError:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Script name already exists", "conflict": True},
+        )
+
+
+@app.post("/api/recording/cancel")
+async def api_recording_cancel() -> dict[str, Any]:
+    """Stop live recording and discard captured steps."""
+    return recording_engine.cancel()
 
 
 @app.get("/api/settings/mqtt")

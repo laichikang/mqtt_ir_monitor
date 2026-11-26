@@ -599,3 +599,67 @@ body {
   display: flex;
   gap: 0.25rem;
 }
+
+/* Live Device Recording Bar */
+.recording-bar {
+  padding: 0.85rem 1rem;
+}
+
+.recording-bar.is-recording {
+  border-color: var(--danger-color);
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
+.recording-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.recording-controls.hidden {
+  display: none;
+}
+
+.recording-live-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.rec-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--danger-color);
+  box-shadow: 0 0 8px var(--danger-color);
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.85); }
+}
+
+.rec-label {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--danger-color);
+  letter-spacing: 0.06em;
+}
+
+.rec-device {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rec-timer {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.recording-active-actions {
+  margin-left: auto;
+}

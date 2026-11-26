@@ -25,6 +25,23 @@ const btnReplaySelected = document.getElementById("btn-replay-selected");
 const btnSaveAsScript = document.getElementById("btn-save-as-script");
 const btnCancelReplay = document.getElementById("btn-cancel-replay");
 
+// Live Device Recording DOM Elements
+const recordingBarEl = document.getElementById("recording-bar");
+const recordingIdleControls = document.getElementById("recording-idle-controls");
+const recordingActiveControls = document.getElementById("recording-active-controls");
+const selectRecordDeviceEl = document.getElementById("select-record-device");
+const checkRecordIncludeTxEl = document.getElementById("check-record-include-tx");
+const btnStartRecording = document.getElementById("btn-start-recording");
+const recDeviceIdEl = document.getElementById("rec-device-id");
+const recElapsedTimerEl = document.getElementById("rec-elapsed-timer");
+const recStepCountEl = document.getElementById("rec-step-count");
+const btnStopSaveRecording = document.getElementById("btn-stop-save-recording");
+const btnStopEditRecording = document.getElementById("btn-stop-edit-recording");
+const btnCancelRecording = document.getElementById("btn-cancel-recording");
+
+let recordingState = { active: false, device_id: null, started_at: null, step_count: 0, steps: [] };
+let recordingTimerInterval = null;
+
 // Action Scripts DOM Elements
 const scriptsListEl = document.getElementById("scripts-list");
 const scriptTargetCheckboxesEl = document.getElementById("script-target-checkboxes");
@@ -124,7 +141,9 @@ function renderDevices(devices, total, online) {
 
   // Target device selector options
   const prevTarget = selectTargetDeviceEl.value;
+  const prevRecordDev = selectRecordDeviceEl.value;
   selectTargetDeviceEl.innerHTML = '<option value="">-- Choose Target --</option>';
+  selectRecordDeviceEl.innerHTML = '<option value="">-- Choose Input Device --</option>';
   filterDeviceEl.innerHTML = '<option value="">All Devices</option>';
 
   devices.forEach(dev => {
@@ -133,6 +152,12 @@ function renderDevices(devices, total, online) {
     optTarget.value = dev.device_id;
     optTarget.textContent = `${dev.device_id} ${dev.online ? "(Online)" : "(Offline)"}`;
     selectTargetDeviceEl.appendChild(optTarget);
+
+    // Record input device selector
+    const optRec = document.createElement("option");
+    optRec.value = dev.device_id;
+    optRec.textContent = `${dev.device_id} ${dev.online ? "(Online)" : "(Offline)"}`;
+    selectRecordDeviceEl.appendChild(optRec);
 
     // Filter selector
     const optFilter = document.createElement("option");
@@ -148,6 +173,14 @@ function renderDevices(devices, total, online) {
     const firstOnline = devices.find(d => d.online === 1);
     if (firstOnline) selectTargetDeviceEl.value = firstOnline.device_id;
   }
+
+  if (prevRecordDev && devices.some(d => d.device_id === prevRecordDev)) {
+    selectRecordDeviceEl.value = prevRecordDev;
+  } else {
+    const firstOnline = devices.find(d => d.online === 1);
+    if (firstOnline) selectRecordDeviceEl.value = firstOnline.device_id;
+  }
+  btnStartRecording.disabled = !selectRecordDeviceEl.value;
 
   filterDeviceEl.value = activeFilterDeviceId;
 
@@ -438,6 +471,8 @@ function handleWsMessage(msg) {
   } else if (msg.type === "history_cleared") {
     fetchDevices();
     fetchNotifications();
+  } else if (msg.type === "recording_status") {
+    applyRecordingStatus(msg.data);
   } else if (msg.type === "replay_status" || msg.type === "script_status") {
     const data = msg.data;
     replayProgressBox.classList.remove("hidden");
@@ -772,8 +807,163 @@ inputImportScript.addEventListener("change", async (e) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Live Device Recording
+// ---------------------------------------------------------------------------
+
+function formatElapsed(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const mins = String(Math.floor(totalSec / 60)).padStart(2, "0");
+  const secs = String(totalSec % 60).padStart(2, "0");
+  return `${mins}:${secs}`;
+}
+
+function updateRecordingTimer() {
+  if (!recordingState.active || !recordingState.started_at) {
+    recElapsedTimerEl.textContent = "00:00";
+    return;
+  }
+  const startedMs = Date.parse(recordingState.started_at);
+  const elapsed = Number.isNaN(startedMs) ? 0 : Math.max(0, Date.now() - startedMs);
+  recElapsedTimerEl.textContent = formatElapsed(elapsed);
+}
+
+function applyRecordingStatus(status) {
+  recordingState = status || { active: false, device_id: null, started_at: null, step_count: 0, steps: [] };
+  if (recordingState.active) {
+    recordingBarEl.classList.add("is-recording");
+    recordingIdleControls.classList.add("hidden");
+    recordingActiveControls.classList.remove("hidden");
+    recDeviceIdEl.textContent = recordingState.device_id || "-";
+    recStepCountEl.textContent = `${recordingState.step_count || 0} step(s)`;
+    updateRecordingTimer();
+    if (!recordingTimerInterval) {
+      recordingTimerInterval = setInterval(updateRecordingTimer, 1000);
+    }
+  } else {
+    recordingBarEl.classList.remove("is-recording");
+    recordingIdleControls.classList.remove("hidden");
+    recordingActiveControls.classList.add("hidden");
+    if (recordingTimerInterval) {
+      clearInterval(recordingTimerInterval);
+      recordingTimerInterval = null;
+    }
+    recElapsedTimerEl.textContent = "00:00";
+  }
+}
+
+async function fetchRecordingStatus() {
+  try {
+    const res = await fetch("/api/recording/status");
+    if (!res.ok) return;
+    const data = await res.json();
+    applyRecordingStatus(data);
+  } catch (err) {
+    console.error("Failed to fetch recording status:", err);
+  }
+}
+
+selectRecordDeviceEl.addEventListener("change", () => {
+  btnStartRecording.disabled = !selectRecordDeviceEl.value;
+});
+
+btnStartRecording.addEventListener("click", async () => {
+  const deviceId = selectRecordDeviceEl.value;
+  if (!deviceId) {
+    alert("Please choose an input device to record.");
+    return;
+  }
+  try {
+    const res = await fetch("/api/recording/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_id: deviceId,
+        include_tx: checkRecordIncludeTxEl.checked,
+        hide_noise: hideNoise,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(`Start recording error: ${data.detail || "Failed"}`);
+      return;
+    }
+    applyRecordingStatus(data);
+  } catch (err) {
+    alert(`Start recording failed: ${err}`);
+  }
+});
+
+btnStopSaveRecording.addEventListener("click", async () => {
+  const name = prompt("Enter a name for the recorded Action Script:");
+  if (!name || !name.trim()) return;
+
+  async function submitStopSave(overwrite) {
+    const res = await fetch("/api/recording/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        overwrite,
+        save: true,
+      }),
+    });
+    if (res.status === 409 && !overwrite) {
+      if (confirm(`Script "${name.trim()}" already exists. Overwrite it?`)) {
+        return submitStopSave(true);
+      }
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      alert(`Stop & Save error: ${data.detail || "Failed"}`);
+      return;
+    }
+    await fetchRecordingStatus();
+    await fetchScripts();
+  }
+
+  try {
+    await submitStopSave(false);
+  } catch (err) {
+    alert(`Stop & Save failed: ${err}`);
+  }
+});
+
+btnStopEditRecording.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/recording/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ save: false }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(`Stop & Edit error: ${data.detail || "Failed"}`);
+      return;
+    }
+    await fetchRecordingStatus();
+    openScriptEditor("", data.steps || []);
+  } catch (err) {
+    alert(`Stop & Edit failed: ${err}`);
+  }
+});
+
+btnCancelRecording.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/recording/cancel", { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      applyRecordingStatus(data);
+    }
+  } catch (err) {
+    alert(`Cancel recording failed: ${err}`);
+  }
+});
+
 // Initial bootstrap
 fetchDevices();
 fetchNotifications();
 fetchScripts();
+fetchRecordingStatus();
 connectWebSocket();

@@ -93,7 +93,19 @@ uv run mypy src
 - `POST /api/scripts/from-notifications` — Compile selected IR notifications into a named Action Script with timestamp deltas.
 - `DELETE /api/scripts/{name}` — Delete a saved Action Script.
 - `POST /api/scripts/{name}/run` — Execute a saved Action Script concurrently across multiple target devices with per-device 120 ms minimum pacing.
-- `WS /ws` — Real-time event push stream (`broker_status`, `device_update`, `notification`, `replay_status`, `script_status`).
+- `GET /api/recording/status` — Get current live device recording state (`active`, `device_id`, `include_tx`, `hide_noise`, `started_at`, `elapsed_ms`, `step_count`, `steps`).
+- `POST /api/recording/start` — Start live recording for an assigned input device (`{"device_id": str, "include_tx": bool, "hide_noise": bool}`).
+- `POST /api/recording/stop` — Stop recording and either save as a named Action Script (`save: true`, returns HTTP 409 on name conflict unless `overwrite: true`) or return captured steps without saving (`save: false`).
+- `POST /api/recording/cancel` — Stop recording and discard all captured steps.
+- `WS /ws` — Real-time event push stream (`broker_status`, `device_update`, `notification`, `replay_status`, `script_status`, `recording_status`).
+
+## Live Device Recording
+
+Live Device Recording lets you assign an input device (for example `deldev02`), capture incoming IR events in real time with exact millisecond delays between steps, and save them as an Action Script:
+
+1. Select an input device in the **Record Input Device** dropdown (optionally check **Include ir_tx**).
+2. Click **Start Recording** and trigger IR commands on the device.
+3. Click **Stop & Save** to save directly as a named Action Script, **Stop & Edit** to inspect/edit the captured steps in the visual Script Editor first, or **Cancel / Discard** to abort.
 
 ## Action Scripts
 

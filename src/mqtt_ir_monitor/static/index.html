@@ -79,6 +79,43 @@
         </div>
       </section>
 
+      <!-- Live Device Recording Bar -->
+      <section class="card recording-bar" id="recording-bar">
+        <div id="recording-idle-controls" class="recording-controls">
+          <div class="control-group">
+            <label for="select-record-device">Record Input Device:</label>
+            <select id="select-record-device" class="form-control">
+              <option value="">-- Choose Input Device --</option>
+            </select>
+          </div>
+          <div class="control-group checkbox-item">
+            <label>
+              <input type="checkbox" id="check-record-include-tx">
+              Include ir_tx
+            </label>
+          </div>
+          <div class="control-group">
+            <button id="btn-start-recording" class="btn btn-danger" disabled>
+              ⏺ Start Recording
+            </button>
+          </div>
+        </div>
+        <div id="recording-active-controls" class="recording-controls hidden">
+          <div class="recording-live-status">
+            <span class="rec-dot"></span>
+            <span class="rec-label">REC</span>
+            <span class="rec-device font-mono" id="rec-device-id">-</span>
+            <span class="rec-timer font-mono" id="rec-elapsed-timer">00:00</span>
+            <span class="badge badge-secondary" id="rec-step-count">0 step(s)</span>
+          </div>
+          <div class="control-group recording-active-actions">
+            <button id="btn-stop-save-recording" class="btn btn-primary">💾 Stop &amp; Save</button>
+            <button id="btn-stop-edit-recording" class="btn btn-secondary">✏ Stop &amp; Edit</button>
+            <button id="btn-cancel-recording" class="btn btn-outline-danger">✕ Cancel / Discard</button>
+          </div>
+        </div>
+      </section>
+
       <!-- Notifications Feed Panel -->
       <section class="card feed-card">
         <div class="card-header feed-header">
