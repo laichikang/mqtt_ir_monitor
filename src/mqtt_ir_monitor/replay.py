@@ -5,10 +5,89 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from mqtt_ir_monitor.db import get_notification_by_id, get_notifications_by_ids
+from mqtt_ir_monitor.db import (
+    get_notification_by_id,
+    get_notifications_by_ids,
+    get_script_by_name,
+)
 from mqtt_ir_monitor.mqtt_service import MqttService
 
 logger = logging.getLogger(__name__)
+
+MAX_SCRIPT_NESTING_DEPTH = 10
+
+
+def resolve_script_steps(
+    db_path: str,
+    steps: list[dict[str, Any]],
+    root_script_name: str | None = None,
+    max_depth: int = MAX_SCRIPT_NESTING_DEPTH,
+) -> list[dict[str, Any]]:
+    """Recursively expand run_script steps into a flat list of executable steps."""
+
+    def _expand(
+        current_steps: list[dict[str, Any]],
+        call_stack: list[str],
+        depth: int,
+    ) -> list[dict[str, Any]]:
+        flat: list[dict[str, Any]] = []
+        for step in current_steps:
+            if step.get("type") == "run_script":
+                target_name = str(step.get("script_name") or "").strip()
+                if not target_name:
+                    raise ValueError("run_script step requires script_name.")
+                if target_name in call_stack:
+                    raise ValueError(f"Circular script reference detected: '{target_name}'")
+                next_depth = depth + 1
+                if next_depth > max_depth:
+                    raise ValueError(f"Maximum script nesting depth ({max_depth}) exceeded")
+                ref_script = get_script_by_name(db_path, target_name)
+                if not ref_script:
+                    raise ValueError(f"Referenced script '{target_name}' not found")
+                lead_delay = max(0, int(step.get("delay_ms", 0)))
+                if lead_delay > 0:
+                    flat.append({"type": "delay", "delay_ms": lead_delay})
+                flat.extend(
+                    _expand(
+                        ref_script["steps"],
+                        [*call_stack, target_name],
+                        next_depth,
+                    )
+                )
+            else:
+                flat.append(dict(step))
+        return flat
+
+    initial_stack = [root_script_name] if root_script_name else []
+    return _expand(steps, initial_stack, 0)
+
+
+def resolve_script_sequence(
+    db_path: str,
+    script_names: list[str],
+    inter_script_delay_ms: int = 500,
+    max_depth: int = MAX_SCRIPT_NESTING_DEPTH,
+) -> list[dict[str, Any]]:
+    """Resolve an ordered list of script names into one flat execution plan."""
+    clean_names = [n.strip() for n in script_names if n.strip()]
+    if not clean_names:
+        raise ValueError("script_names cannot be empty.")
+
+    flat: list[dict[str, Any]] = []
+    for idx, name in enumerate(clean_names):
+        script = get_script_by_name(db_path, name)
+        if not script:
+            raise ValueError(f"Referenced script '{name}' not found")
+        resolved = resolve_script_steps(
+            db_path=db_path,
+            steps=script["steps"],
+            root_script_name=name,
+            max_depth=max_depth,
+        )
+        if idx > 0 and inter_script_delay_ms > 0:
+            flat.append({"type": "delay", "delay_ms": inter_script_delay_ms})
+        flat.extend(resolved)
+    return flat
 
 
 def compile_notifications_to_steps(

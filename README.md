@@ -92,7 +92,8 @@ uv run mypy src
 - `POST /api/scripts` — Create or overwrite a named Action Script (returns HTTP 409 on name conflict unless `overwrite: true`).
 - `POST /api/scripts/from-notifications` — Compile selected IR notifications into a named Action Script with timestamp deltas.
 - `DELETE /api/scripts/{name}` — Delete a saved Action Script.
-- `POST /api/scripts/{name}/run` — Execute a saved Action Script concurrently across multiple target devices with per-device 120 ms minimum pacing.
+- `POST /api/scripts/{name}/run` — Execute a saved Action Script (recursively resolving any nested `run_script` steps) concurrently across multiple target devices with per-device 120 ms minimum pacing.
+- `POST /api/scripts/run-sequence` — Execute multiple saved Action Scripts in sequence (`{"script_names": [str], "target_device_ids": [str], "speed": float, "inter_script_delay_ms": int}`) concurrently across target devices.
 - `GET /api/recording/status` — Get current live device recording state (`active`, `device_id`, `include_tx`, `hide_noise`, `started_at`, `elapsed_ms`, `step_count`, `steps`).
 - `POST /api/recording/start` — Start live recording for an assigned input device (`{"device_id": str, "include_tx": bool, "hide_noise": bool}`).
 - `POST /api/recording/stop` — Stop recording and either save as a named Action Script (`save: true`, returns HTTP 409 on name conflict unless `overwrite: true`) or return captured steps without saving (`save: false`).
@@ -117,7 +118,8 @@ Supported step types:
 - `clearkeydetail`: `{"type": "clearkeydetail", "delay_ms": 0}`
 - `replaylast`: `{"type": "replaylast", "delay_ms": 0}`
 - `delay`: `{"type": "delay", "delay_ms": 500}`
+- `run_script`: `{"type": "run_script", "script_name": "wifi_setting", "delay_ms": 0}` (recursively resolved before execution; detects missing scripts, circular references, and nesting depth > 10)
 
 In the web dashboard:
 - Select notifications and click **Save as Script** to convert them into a named `sendircode` script.
-- Use the **Action Scripts** panel to create, visually edit, export/import JSON, delete, or run scripts concurrently across checked target devices.
+- Use the **Action Scripts** panel to create, visually edit (including `run_script` steps), export/import JSON, delete, run individual scripts, or check multiple scripts and click **Run Selected in Sequence** with a configurable inter-script delay.

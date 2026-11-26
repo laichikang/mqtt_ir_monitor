@@ -191,6 +191,15 @@
               <span class="empty-inline">No devices registered</span>
             </div>
           </div>
+          <div class="script-sequence-bar">
+            <div class="control-group">
+              <label for="input-inter-script-delay">Inter-script delay (ms):</label>
+              <input type="number" id="input-inter-script-delay" class="form-control delay-input" min="0" step="100" value="500">
+            </div>
+            <button id="btn-run-script-sequence" class="btn btn-primary" disabled>
+              ▶ Run Selected in Sequence (<span id="script-sequence-count">0</span>)
+            </button>
+          </div>
           <ul id="scripts-list" class="scripts-list">
             <li class="empty-state">No action scripts saved yet</li>
           </ul>
