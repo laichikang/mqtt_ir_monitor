@@ -32,7 +32,12 @@ from mqtt_ir_monitor.recording import (
     RecordingEngine,
     RecordingNotActiveError,
 )
-from mqtt_ir_monitor.replay import ReplayEngine, compile_notifications_to_steps
+from mqtt_ir_monitor.replay import (
+    ReplayEngine,
+    compile_notifications_to_steps,
+    resolve_script_sequence,
+    resolve_script_steps,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mqtt_ir_monitor.app")
@@ -125,7 +130,7 @@ class MqttSettingsRequest(BaseModel):
 
 
 class ActionStepModel(BaseModel):
-    type: Literal["sendircode", "digital", "clearkeydetail", "replaylast", "delay"]
+    type: Literal["sendircode", "digital", "clearkeydetail", "replaylast", "delay", "run_script"]
     delay_ms: int = Field(default=0, ge=0)
     prot: int | None = None
     addr: int | None = None
@@ -133,6 +138,7 @@ class ActionStepModel(BaseModel):
     flags: int | None = None
     pin: int | None = None
     value: Literal[0, 1] | None = None
+    script_name: str | None = None
 
     @model_validator(mode="after")
     def validate_step_fields(self) -> "ActionStepModel":
@@ -143,6 +149,11 @@ class ActionStepModel(BaseModel):
                 self.flags = 0
         elif self.type == "digital" and (self.pin is None or self.value is None):
             raise ValueError("digital step requires pin and value (0 or 1).")
+        elif self.type == "run_script":
+            clean_ref = (self.script_name or "").strip()
+            if not clean_ref:
+                raise ValueError("run_script step requires script_name.")
+            self.script_name = clean_ref
         return self
 
     def to_step_dict(self) -> dict[str, Any]:
@@ -160,6 +171,12 @@ class ActionStepModel(BaseModel):
                 "type": "digital",
                 "pin": self.pin,
                 "value": self.value,
+                "delay_ms": self.delay_ms,
+            }
+        if self.type == "run_script":
+            return {
+                "type": "run_script",
+                "script_name": self.script_name,
                 "delay_ms": self.delay_ms,
             }
         return {"type": self.type, "delay_ms": self.delay_ms}
@@ -181,6 +198,13 @@ class ScriptFromNotificationsRequest(BaseModel):
 class ScriptRunRequest(BaseModel):
     target_device_ids: list[str]
     speed: float = Field(default=1.0, ge=0.1, le=5.0)
+
+
+class ScriptRunSequenceRequest(BaseModel):
+    script_names: list[str]
+    target_device_ids: list[str]
+    speed: float = Field(default=1.0, ge=0.1, le=5.0)
+    inter_script_delay_ms: int = Field(default=500, ge=0)
 
 
 class RecordingStartRequest(BaseModel):
@@ -377,6 +401,41 @@ async def api_delete_script(name: str) -> dict[str, Any]:
     return {"status": "ok", "deleted": True, "name": name}
 
 
+@app.post("/api/scripts/run-sequence")
+async def api_run_script_sequence(req: ScriptRunSequenceRequest) -> dict[str, Any]:
+    """Execute multiple saved action scripts in sequence across target devices."""
+    targets = [t.strip() for t in req.target_device_ids if t.strip()]
+    if not targets:
+        raise HTTPException(status_code=400, detail="target_device_ids cannot be empty.")
+    clean_names = [n.strip() for n in req.script_names if n.strip()]
+    if not clean_names:
+        raise HTTPException(status_code=400, detail="script_names cannot be empty.")
+    try:
+        resolved_steps = resolve_script_sequence(
+            db_path=settings.db_path,
+            script_names=clean_names,
+            inter_script_delay_ms=req.inter_script_delay_ms,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    sequence_label = " -> ".join(clean_names)
+    replay_engine.start_script(
+        script_name=sequence_label,
+        steps=resolved_steps,
+        target_device_ids=targets,
+        speed=req.speed,
+    )
+    return {
+        "status": "started",
+        "script_names": clean_names,
+        "step_count": len(resolved_steps),
+        "target_device_ids": targets,
+        "speed": req.speed,
+        "inter_script_delay_ms": req.inter_script_delay_ms,
+    }
+
+
 @app.post("/api/scripts/{name}/run")
 async def api_run_script(name: str, req: ScriptRunRequest) -> dict[str, Any]:
     """Execute a saved action script concurrently across target devices."""
@@ -386,16 +445,24 @@ async def api_run_script(name: str, req: ScriptRunRequest) -> dict[str, Any]:
     targets = [t.strip() for t in req.target_device_ids if t.strip()]
     if not targets:
         raise HTTPException(status_code=400, detail="target_device_ids cannot be empty.")
+    try:
+        resolved_steps = resolve_script_steps(
+            db_path=settings.db_path,
+            steps=script["steps"],
+            root_script_name=script["name"],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     replay_engine.start_script(
         script_name=script["name"],
-        steps=script["steps"],
+        steps=resolved_steps,
         target_device_ids=targets,
         speed=req.speed,
     )
     return {
         "status": "started",
         "script_name": script["name"],
-        "step_count": script["step_count"],
+        "step_count": len(resolved_steps),
         "target_device_ids": targets,
         "speed": req.speed,
     }

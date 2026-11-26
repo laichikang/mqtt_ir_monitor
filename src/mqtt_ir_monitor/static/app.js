@@ -48,6 +48,9 @@ const scriptTargetCheckboxesEl = document.getElementById("script-target-checkbox
 const btnNewScript = document.getElementById("btn-new-script");
 const btnImportScript = document.getElementById("btn-import-script");
 const inputImportScript = document.getElementById("input-import-script");
+const inputInterScriptDelay = document.getElementById("input-inter-script-delay");
+const btnRunScriptSequence = document.getElementById("btn-run-script-sequence");
+const scriptSequenceCountEl = document.getElementById("script-sequence-count");
 
 // Script Editor Modal Elements
 const scriptEditorModal = document.getElementById("script-editor-modal");
@@ -61,6 +64,7 @@ const btnSaveScriptEditor = document.getElementById("btn-save-script-editor");
 
 let savedScripts = [];
 let selectedScriptTargets = new Set();
+let selectedScriptSequence = [];
 let editorSteps = [];
 const selectedCountEl = document.getElementById("selected-count");
 const replayProgressBox = document.getElementById("replay-progress-box");
@@ -539,19 +543,33 @@ async function fetchScripts() {
   }
 }
 
+function updateScriptSequenceControls() {
+  const existingNames = new Set(savedScripts.map((s) => s.name));
+  selectedScriptSequence = selectedScriptSequence.filter((name) => existingNames.has(name));
+  scriptSequenceCountEl.textContent = selectedScriptSequence.length;
+  btnRunScriptSequence.disabled = selectedScriptSequence.length === 0;
+}
+
 function renderScripts() {
+  updateScriptSequenceControls();
   if (!savedScripts || savedScripts.length === 0) {
     scriptsListEl.innerHTML = '<li class="empty-state">No action scripts saved yet</li>';
     return;
   }
   scriptsListEl.innerHTML = "";
   savedScripts.forEach((script) => {
+    const seqIndex = selectedScriptSequence.indexOf(script.name);
+    const isSelected = seqIndex !== -1;
     const li = document.createElement("li");
     li.className = "script-item";
     li.innerHTML = `
-      <div class="script-item-info">
-        <span class="script-item-name">${script.name}</span>
-        <span class="script-item-meta">${script.step_count} step(s) &middot; Updated ${formatTime(script.updated_at)}</span>
+      <div class="script-item-left">
+        <input type="checkbox" class="script-seq-cb" data-name="${script.name}" ${isSelected ? "checked" : ""}>
+        ${isSelected ? `<span class="script-seq-badge">#${seqIndex + 1}</span>` : ""}
+        <div class="script-item-info">
+          <span class="script-item-name">${script.name}</span>
+          <span class="script-item-meta">${script.step_count} step(s) &middot; Updated ${formatTime(script.updated_at)}</span>
+        </div>
       </div>
       <div class="script-item-actions">
         <button class="btn btn-primary btn-run-script" data-name="${script.name}">▶ Run</button>
@@ -561,6 +579,18 @@ function renderScripts() {
       </div>
     `;
     scriptsListEl.appendChild(li);
+  });
+
+  document.querySelectorAll(".script-seq-cb").forEach((cb) => {
+    cb.addEventListener("change", (e) => {
+      const name = e.target.dataset.name;
+      if (e.target.checked) {
+        if (!selectedScriptSequence.includes(name)) selectedScriptSequence.push(name);
+      } else {
+        selectedScriptSequence = selectedScriptSequence.filter((item) => item !== name);
+      }
+      renderScripts();
+    });
   });
 
   document.querySelectorAll(".btn-run-script").forEach((btn) => {
@@ -684,6 +714,9 @@ function defaultStepForType(type) {
   if (type === "sendircode") return { type: "sendircode", prot: 8, addr: 0, cmd: 0, flags: 0, delay_ms: 0 };
   if (type === "digital") return { type: "digital", pin: 5, value: 1, delay_ms: 0 };
   if (type === "delay") return { type: "delay", delay_ms: 500 };
+  if (type === "run_script") {
+    return { type: "run_script", script_name: savedScripts[0]?.name || "", delay_ms: 0 };
+  }
   return { type, delay_ms: 0 };
 }
 
@@ -721,6 +754,20 @@ function renderEditorSteps() {
           <option value="1" ${step.value !== 0 ? "selected" : ""}>1 (HIGH)</option>
         </select></label>
       `;
+    } else if (step.type === "run_script") {
+      const scriptNames = savedScripts.map((s) => s.name);
+      if (step.script_name && !scriptNames.includes(step.script_name)) {
+        scriptNames.unshift(step.script_name);
+      }
+      const optionsHtml = scriptNames
+        .map((n) => `<option value="${n}" ${step.script_name === n ? "selected" : ""}>${n}</option>`)
+        .join("");
+      fieldsHtml = `
+        <label>script <select class="form-control" data-field="script_name">
+          <option value="">-- Choose Script --</option>
+          ${optionsHtml}
+        </select></label>
+      `;
     }
 
     row.innerHTML = `
@@ -731,6 +778,7 @@ function renderEditorSteps() {
         <option value="clearkeydetail" ${step.type === "clearkeydetail" ? "selected" : ""}>clearkeydetail</option>
         <option value="replaylast" ${step.type === "replaylast" ? "selected" : ""}>replaylast</option>
         <option value="delay" ${step.type === "delay" ? "selected" : ""}>delay</option>
+        <option value="run_script" ${step.type === "run_script" ? "selected" : ""}>run_script</option>
       </select>
       <div class="step-fields">
         ${fieldsHtml}
@@ -749,7 +797,12 @@ function renderEditorSteps() {
     });
     row.querySelectorAll("[data-field]").forEach((input) => {
       input.addEventListener("change", (e) => {
-        editorSteps[idx][e.target.dataset.field] = parseInt(e.target.value, 10) || 0;
+        const field = e.target.dataset.field;
+        if (field === "script_name") {
+          editorSteps[idx][field] = e.target.value;
+        } else {
+          editorSteps[idx][field] = parseInt(e.target.value, 10) || 0;
+        }
       });
     });
     row.querySelector(".btn-step-up").addEventListener("click", () => {
@@ -774,6 +827,40 @@ function renderEditorSteps() {
 }
 
 btnNewScript.addEventListener("click", () => openScriptEditor("", []));
+btnRunScriptSequence.addEventListener("click", async () => {
+  if (selectedScriptSequence.length === 0) return;
+  const targets = Array.from(selectedScriptTargets);
+  if (targets.length === 0) {
+    alert("Please select at least one target device in the Action Scripts panel.");
+    return;
+  }
+  const speed = parseFloat(inputReplaySpeed.value) || 1.0;
+  const interDelay = Math.max(0, parseInt(inputInterScriptDelay.value, 10) || 0);
+  try {
+    const res = await fetch("/api/scripts/run-sequence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        script_names: selectedScriptSequence,
+        target_device_ids: targets,
+        speed,
+        inter_script_delay_ms: interDelay,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(`Run sequence error: ${data.detail || "Failed"}`);
+      return;
+    }
+    isReplaying = true;
+    btnCancelReplay.disabled = false;
+    replayProgressBox.classList.remove("hidden");
+    replayProgressBar.style.width = "0%";
+    replayStatusMessage.textContent = `Running ${selectedScriptSequence.length} script(s) on ${targets.length} device(s)...`;
+  } catch (err) {
+    alert(`Run sequence failed: ${err}`);
+  }
+});
 btnCloseScriptEditor.addEventListener("click", closeScriptEditor);
 btnCancelScriptEditor.addEventListener("click", closeScriptEditor);
 btnAddStep.addEventListener("click", () => {
