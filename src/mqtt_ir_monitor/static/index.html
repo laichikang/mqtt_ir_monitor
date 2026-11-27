@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <!-- Top Navigation Bar -->
+  <!-- Pinned Top Navigation Bar -->
   <header class="topbar">
     <div class="brand">
       <span class="icon">📡</span>
@@ -24,187 +24,247 @@
   </header>
 
   <!-- Main Container -->
-  <div class="main-layout">
-    <!-- Left Sidebar: Devices Panel -->
-    <aside class="sidebar">
-      <div class="card devices-card">
-        <div class="card-header">
-          <h2>Registered Devices</h2>
-          <div class="device-stats">
-            <span class="badge badge-success" id="stat-online-count">Online: 0</span>
-            <span class="badge badge-secondary" id="stat-total-count">Total: 0</span>
-          </div>
-        </div>
-        <div class="card-body">
-          <ul id="device-list" class="device-list">
-            <li class="empty-state">No devices registered yet</li>
-          </ul>
+  <div class="dashboard-shell">
+    <!-- Pinned Registered Devices Bar -->
+    <section class="card devices-card pinned-devices" aria-label="Registered Devices">
+      <div class="card-header devices-header">
+        <h2>Registered Devices</h2>
+        <div class="device-stats">
+          <span class="badge badge-success" id="stat-online-count">Online: 0</span>
+          <span class="badge badge-secondary" id="stat-total-count">Total: 0</span>
         </div>
       </div>
-    </aside>
+      <div class="card-body devices-body">
+        <ul id="device-list" class="device-list device-list-horizontal">
+          <li class="empty-state">No devices registered yet</li>
+        </ul>
+      </div>
+    </section>
 
-    <!-- Main Content Area: Notifications & Replay -->
-    <main class="content-area">
-      <!-- Replay Controls Toolbar -->
-      <section class="card replay-bar">
-        <div class="replay-controls">
-          <div class="control-group">
-            <label for="select-target-device">Target Device:</label>
-            <select id="select-target-device" class="form-control">
-              <option value="">-- Choose Target --</option>
-            </select>
-          </div>
-          <div class="control-group">
-            <label for="input-replay-speed">Speed:</label>
-            <input type="number" id="input-replay-speed" class="form-control speed-input" min="0.1" max="5.0" step="0.1" value="1.0">
-            <span class="unit">x</span>
-          </div>
-          <div class="control-group">
-            <button id="btn-replay-selected" class="btn btn-primary" disabled>
-              ▶ Replay Selected (<span id="selected-count">0</span>)
-            </button>
-            <button id="btn-save-as-script" class="btn btn-secondary" disabled>
-              💾 Save as Script
-            </button>
-            <button id="btn-cancel-replay" class="btn btn-danger" disabled>
-              ⏹ Cancel Replay
-            </button>
-          </div>
-        </div>
-        <div id="replay-progress-box" class="replay-progress-box hidden">
-          <div class="progress-bar-container">
-            <div id="replay-progress-bar" class="progress-bar" style="width: 0%"></div>
-          </div>
-          <div id="replay-status-message" class="status-msg">Ready</div>
-        </div>
-      </section>
+    <!-- Semantic 2-Tab Navigation Bar -->
+    <nav class="tabs-bar" aria-label="Dashboard sections">
+      <div class="tablist" role="tablist" aria-label="Dashboard views">
+        <button
+          type="button"
+          id="tab-monitor"
+          class="tab-btn"
+          role="tab"
+          aria-selected="true"
+          tabindex="0"
+          data-tab="monitor"
+        >
+          <span class="tab-label">Live Monitor</span>
+          <span class="tab-badge" id="tab-badge-monitor" title="Notifications count">0</span>
+          <span class="tab-badge tab-badge-rec hidden" id="tab-badge-recording">REC</span>
+        </button>
+        <button
+          type="button"
+          id="tab-scripts"
+          class="tab-btn"
+          role="tab"
+          aria-selected="false"
+          tabindex="-1"
+          data-tab="scripts"
+        >
+          <span class="tab-label">Action Scripts</span>
+          <span class="tab-badge" id="tab-badge-scripts" title="Saved scripts count">0</span>
+          <span class="tab-badge tab-badge-running hidden" id="tab-badge-running">Running</span>
+        </button>
+      </div>
+    </nav>
 
-      <!-- Live Device Recording Bar -->
-      <section class="card recording-bar" id="recording-bar">
-        <div id="recording-idle-controls" class="recording-controls">
-          <div class="control-group">
-            <label for="select-record-device">Record Input Device:</label>
-            <select id="select-record-device" class="form-control">
-              <option value="">-- Choose Input Device --</option>
-            </select>
-          </div>
-          <div class="control-group checkbox-item">
-            <label>
-              <input type="checkbox" id="check-record-include-tx">
-              Include ir_tx
-            </label>
-          </div>
-          <div class="control-group">
-            <button id="btn-start-recording" class="btn btn-danger" disabled>
-              ⏺ Start Recording
-            </button>
-          </div>
-        </div>
-        <div id="recording-active-controls" class="recording-controls hidden">
-          <div class="recording-live-status">
-            <span class="rec-dot"></span>
-            <span class="rec-label">REC</span>
-            <span class="rec-device font-mono" id="rec-device-id">-</span>
-            <span class="rec-timer font-mono" id="rec-elapsed-timer">00:00</span>
-            <span class="badge badge-secondary" id="rec-step-count">0 step(s)</span>
-          </div>
-          <div class="control-group recording-active-actions">
-            <button id="btn-stop-save-recording" class="btn btn-primary">💾 Stop &amp; Save</button>
-            <button id="btn-stop-edit-recording" class="btn btn-secondary">✏ Stop &amp; Edit</button>
-            <button id="btn-cancel-recording" class="btn btn-outline-danger">✕ Cancel / Discard</button>
-          </div>
-        </div>
-      </section>
+    <!-- Main Tab Panels -->
+    <main class="tab-panels">
+      <!-- Tab 1: Live Monitor (#monitor) -->
+      <div
+        id="panel-monitor"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-monitor"
+        data-tab-panel="monitor"
+      >
+        <div class="tab-panel-inner content-area">
+          <!-- Replay Controls Toolbar -->
+          <section class="card replay-bar">
+            <div class="replay-controls">
+              <div class="control-group">
+                <label for="select-target-device">Target Device:</label>
+                <select id="select-target-device" class="form-control">
+                  <option value="">-- Choose Target --</option>
+                </select>
+              </div>
+              <div class="control-group">
+                <label for="input-replay-speed">Speed:</label>
+                <input type="number" id="input-replay-speed" class="form-control speed-input" min="0.1" max="5.0" step="0.1" value="1.0">
+                <span class="unit">x</span>
+              </div>
+              <div class="control-group">
+                <button id="btn-replay-selected" class="btn btn-primary" disabled>
+                  ▶ Replay Selected (<span id="selected-count">0</span>)
+                </button>
+                <button id="btn-save-as-script" class="btn btn-secondary" disabled>
+                  💾 Save as Script
+                </button>
+                <button id="btn-cancel-replay" class="btn btn-danger" disabled>
+                  ⏹ Cancel Replay
+                </button>
+              </div>
+            </div>
+            <div id="replay-progress-box" class="replay-progress-box hidden">
+              <div class="progress-bar-container">
+                <div id="replay-progress-bar" class="progress-bar" style="width: 0%"></div>
+              </div>
+              <div id="replay-status-message" class="status-msg">Ready</div>
+            </div>
+          </section>
 
-      <!-- Notifications Feed Panel -->
-      <section class="card feed-card">
-        <div class="card-header feed-header">
-          <div class="filters-row">
-            <div class="filter-item">
-              <label for="filter-device">Device:</label>
-              <select id="filter-device" class="form-control">
-                <option value="">All Devices</option>
-              </select>
+          <!-- Live Device Recording Bar -->
+          <section class="card recording-bar" id="recording-bar">
+            <div id="recording-idle-controls" class="recording-controls">
+              <div class="control-group">
+                <label for="select-record-device">Record Input Device:</label>
+                <select id="select-record-device" class="form-control">
+                  <option value="">-- Choose Input Device --</option>
+                </select>
+              </div>
+              <div class="control-group checkbox-item">
+                <label>
+                  <input type="checkbox" id="check-record-include-tx">
+                  Include ir_tx
+                </label>
+              </div>
+              <div class="control-group">
+                <button id="btn-start-recording" class="btn btn-danger" disabled>
+                  ⏺ Start Recording
+                </button>
+              </div>
             </div>
-            <div class="filter-item">
-              <label for="filter-event">Event:</label>
-              <select id="filter-event" class="form-control">
-                <option value="">All Events</option>
-                <option value="ir_rx">ir_rx</option>
-                <option value="ir_tx">ir_tx</option>
-                <option value="reply">reply</option>
-                <option value="other">other</option>
-              </select>
+            <div id="recording-active-controls" class="recording-controls hidden">
+              <div class="recording-live-status">
+                <span class="rec-dot"></span>
+                <span class="rec-label">REC</span>
+                <span class="rec-device font-mono" id="rec-device-id">-</span>
+                <span class="rec-timer font-mono" id="rec-elapsed-timer">00:00</span>
+                <span class="badge badge-secondary" id="rec-step-count">0 step(s)</span>
+              </div>
+              <div class="control-group recording-active-actions">
+                <button id="btn-stop-save-recording" class="btn btn-primary">💾 Stop &amp; Save</button>
+                <button id="btn-stop-edit-recording" class="btn btn-secondary">✏ Stop &amp; Edit</button>
+                <button id="btn-cancel-recording" class="btn btn-outline-danger">✕ Cancel / Discard</button>
+              </div>
             </div>
-            <div class="filter-item checkbox-item">
-              <label>
-                <input type="checkbox" id="check-hide-noise" checked>
-                Hide protocol-2 noise
-              </label>
-            </div>
-            <div class="filter-item actions-item">
-              <button id="btn-clear-history" class="btn btn-outline-danger">Clear History</button>
-            </div>
-          </div>
-        </div>
+          </section>
 
-        <div class="card-body table-responsive">
-          <table class="data-table" id="table-notifications">
-            <thead>
-              <tr>
-                <th style="width: 40px;">
-                  <input type="checkbox" id="select-all-notifications" title="Select all visible">
-                </th>
-                <th>Time (UTC)</th>
-                <th>Device</th>
-                <th>Event</th>
-                <th>Protocol</th>
-                <th>Addr</th>
-                <th>Cmd</th>
-                <th>Flags</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="notifications-tbody">
-              <tr>
-                <td colspan="9" class="empty-state">No notifications recorded</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <!-- Notifications Feed Panel (Bounded Scrollable) -->
+          <section class="card feed-card">
+            <div class="card-header feed-header">
+              <div class="filters-row">
+                <div class="filter-item">
+                  <label for="filter-device">Device:</label>
+                  <select id="filter-device" class="form-control">
+                    <option value="">All Devices</option>
+                  </select>
+                </div>
+                <div class="filter-item">
+                  <label for="filter-event">Event:</label>
+                  <select id="filter-event" class="form-control">
+                    <option value="">All Events</option>
+                    <option value="ir_rx">ir_rx</option>
+                    <option value="ir_tx">ir_tx</option>
+                    <option value="reply">reply</option>
+                    <option value="other">other</option>
+                  </select>
+                </div>
+                <div class="filter-item checkbox-item">
+                  <label>
+                    <input type="checkbox" id="check-hide-noise" checked>
+                    Hide protocol-2 noise
+                  </label>
+                </div>
+                <div class="filter-item actions-item">
+                  <button id="btn-clear-history" class="btn btn-outline-danger">Clear History</button>
+                </div>
+              </div>
+            </div>
 
-      <!-- Action Scripts Panel -->
-      <section class="card scripts-card">
-        <div class="card-header">
-          <h2>Action Scripts</h2>
-          <div class="script-header-actions">
-            <button id="btn-new-script" class="btn btn-primary">+ New Script</button>
-            <button id="btn-import-script" class="btn btn-secondary">Import JSON</button>
-            <input type="file" id="input-import-script" accept=".json,application/json" class="hidden-input">
-          </div>
-        </div>
-        <div class="card-body">
-          <div class="script-targets-bar">
-            <span class="targets-label">Run Targets (concurrent):</span>
-            <div id="script-target-checkboxes" class="script-target-checkboxes">
-              <span class="empty-inline">No devices registered</span>
+            <div class="card-body table-responsive feed-scroll-container">
+              <table class="data-table" id="table-notifications">
+                <thead>
+                  <tr>
+                    <th style="width: 40px;">
+                      <input type="checkbox" id="select-all-notifications" title="Select all visible">
+                    </th>
+                    <th>Time (UTC)</th>
+                    <th>Device</th>
+                    <th>Event</th>
+                    <th>Protocol</th>
+                    <th>Addr</th>
+                    <th>Cmd</th>
+                    <th>Flags</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="notifications-tbody">
+                  <tr>
+                    <td colspan="9" class="empty-state">No notifications recorded</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-          </div>
-          <div class="script-sequence-bar">
-            <div class="control-group">
-              <label for="input-inter-script-delay">Inter-script delay (ms):</label>
-              <input type="number" id="input-inter-script-delay" class="form-control delay-input" min="0" step="100" value="500">
-            </div>
-            <button id="btn-run-script-sequence" class="btn btn-primary" disabled>
-              ▶ Run Selected in Sequence (<span id="script-sequence-count">0</span>)
-            </button>
-          </div>
-          <ul id="scripts-list" class="scripts-list">
-            <li class="empty-state">No action scripts saved yet</li>
-          </ul>
+          </section>
         </div>
-      </section>
+      </div>
+
+      <!-- Tab 2: Action Scripts (#scripts) -->
+      <div
+        id="panel-scripts"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-scripts"
+        data-tab-panel="scripts"
+        hidden
+      >
+        <div class="tab-panel-inner content-area">
+          <!-- Action Scripts Panel -->
+          <section class="card scripts-card">
+            <div class="card-header">
+              <h2>Action Scripts</h2>
+              <div class="script-header-actions">
+                <button id="btn-new-script" class="btn btn-primary">+ New Script</button>
+                <button id="btn-import-script" class="btn btn-secondary">Import JSON</button>
+                <button id="btn-stop-script-run" class="btn btn-danger" disabled>⏹ Stop</button>
+                <input type="file" id="input-import-script" accept=".json,application/json" class="hidden-input">
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="script-progress-box" class="replay-progress-box script-progress-box hidden">
+                <div class="progress-bar-container">
+                  <div id="script-progress-bar" class="progress-bar" style="width: 0%"></div>
+                </div>
+                <div id="script-status-message" class="status-msg">Ready</div>
+              </div>
+              <div class="script-targets-bar">
+                <span class="targets-label">Run Targets (concurrent):</span>
+                <div id="script-target-checkboxes" class="script-target-checkboxes">
+                  <span class="empty-inline">No devices registered</span>
+                </div>
+              </div>
+              <div class="script-sequence-bar">
+                <div class="control-group">
+                  <label for="input-inter-script-delay">Inter-script delay (ms):</label>
+                  <input type="number" id="input-inter-script-delay" class="form-control delay-input" min="0" step="100" value="500">
+                </div>
+                <button id="btn-run-script-sequence" class="btn btn-primary" disabled>
+                  ▶ Run Selected in Sequence (<span id="script-sequence-count">0</span>)
+                </button>
+              </div>
+              <ul id="scripts-list" class="scripts-list">
+                <li class="empty-state">No action scripts saved yet</li>
+              </ul>
+            </div>
+          </section>
+        </div>
+      </div>
     </main>
   </div>
 

@@ -146,3 +146,50 @@ def test_websocket_channel():
         ws.send_text("ping")
         pong = ws.receive_json()
         assert pong["type"] == "pong"
+
+
+def test_tabbed_dashboard_html_and_assets():
+    with TestClient(app) as client:
+        res = client.get("/")
+        assert res.status_code == 200
+        html = res.text
+
+        # Semantic 2-tab markup and pinned header/devices above tablist
+        assert 'role="tablist"' in html
+        assert 'id="tab-monitor"' in html
+        assert 'id="tab-scripts"' in html
+        assert 'role="tab"' in html
+        assert 'aria-selected="true"' in html
+        assert 'id="panel-monitor"' in html
+        assert 'id="panel-scripts"' in html
+        assert 'role="tabpanel"' in html
+
+        # Pinned Registered Devices appears before tablist in document order
+        assert html.index("Registered Devices") < html.index('role="tablist"')
+        # Tab panels contain expected sections
+        monitor_panel = html[html.index('id="panel-monitor"') : html.index('id="panel-scripts"')]
+        scripts_panel = html[html.index('id="panel-scripts"') :]
+        assert "replay-bar" in monitor_panel
+        assert "recording-bar" in monitor_panel
+        assert "feed-scroll-container" in monitor_panel
+        assert "scripts-card" in scripts_panel
+        assert 'id="btn-stop-script-run"' in scripts_panel
+
+        # Live badges on both tabs
+        assert 'id="tab-badge-monitor"' in html
+        assert 'id="tab-badge-scripts"' in html
+        assert 'id="tab-badge-running"' in html
+
+        # CSS has bounded scrollable feed and aria-selected underline indicator
+        css_res = client.get("/static/app.css")
+        assert css_res.status_code == 200
+        assert "overflow-y: auto" in css_res.text
+        assert "max-height:" in css_res.text
+        assert '[aria-selected="true"]::after' in css_res.text
+
+        # JS supports URL hash persistence, hashchange, and auto-switch to #scripts
+        js_res = client.get("/static/app.js")
+        assert js_res.status_code == 200
+        assert "normalizeTabFromHash" in js_res.text
+        assert "hashchange" in js_res.text
+        assert 'activateTab("scripts")' in js_res.text

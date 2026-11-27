@@ -6,6 +6,101 @@ let activeFilterDeviceId = "";
 let activeFilterEvent = "";
 let hideNoise = true;
 let isReplaying = false;
+let activeTab = "monitor";
+
+// Tab Navigation DOM Elements
+const tablistEl = document.querySelector('[role="tablist"]');
+const tabMonitorBtn = document.getElementById("tab-monitor");
+const tabScriptsBtn = document.getElementById("tab-scripts");
+const panelMonitorEl = document.getElementById("panel-monitor");
+const panelScriptsEl = document.getElementById("panel-scripts");
+const tabBadgeMonitorEl = document.getElementById("tab-badge-monitor");
+const tabBadgeRecordingEl = document.getElementById("tab-badge-recording");
+const tabBadgeScriptsEl = document.getElementById("tab-badge-scripts");
+const tabBadgeRunningEl = document.getElementById("tab-badge-running");
+const btnStopScriptRun = document.getElementById("btn-stop-script-run");
+const scriptProgressBox = document.getElementById("script-progress-box");
+const scriptProgressBar = document.getElementById("script-progress-bar");
+const scriptStatusMessage = document.getElementById("script-status-message");
+
+function normalizeTabFromHash(hash) {
+  const cleaned = (hash || "").replace(/^#/, "").trim().toLowerCase();
+  return cleaned === "scripts" ? "scripts" : "monitor";
+}
+
+function activateTab(tabName, { updateHash = true, focusTab = false } = {}) {
+  const target = tabName === "scripts" ? "scripts" : "monitor";
+  activeTab = target;
+  const isMonitor = target === "monitor";
+
+  tabMonitorBtn.setAttribute("aria-selected", String(isMonitor));
+  tabMonitorBtn.tabIndex = isMonitor ? 0 : -1;
+  tabScriptsBtn.setAttribute("aria-selected", String(!isMonitor));
+  tabScriptsBtn.tabIndex = isMonitor ? -1 : 0;
+
+  panelMonitorEl.hidden = !isMonitor;
+  panelScriptsEl.hidden = isMonitor;
+
+  if (updateHash && window.location.hash !== `#${target}`) {
+    history.replaceState(null, "", `#${target}`);
+  }
+  if (focusTab) {
+    (isMonitor ? tabMonitorBtn : tabScriptsBtn).focus();
+  }
+}
+
+function setRunProgressState({ running, message, percent }) {
+  isReplaying = running;
+  btnCancelReplay.disabled = !running;
+  if (btnStopScriptRun) btnStopScriptRun.disabled = !running;
+  if (tabBadgeRunningEl) tabBadgeRunningEl.classList.toggle("hidden", !running);
+
+  [
+    { box: replayProgressBox, bar: replayProgressBar, msg: replayStatusMessage },
+    { box: scriptProgressBox, bar: scriptProgressBar, msg: scriptStatusMessage },
+  ].forEach(({ box, bar, msg }) => {
+    if (!box) return;
+    if (running || message) {
+      box.classList.remove("hidden");
+    }
+    if (msg && message !== undefined) {
+      msg.textContent = message;
+    }
+    if (bar && typeof percent === "number") {
+      bar.style.width = `${percent}%`;
+    }
+  });
+}
+
+function hideRunProgressBoxesIfIdle() {
+  if (!isReplaying) {
+    replayProgressBox.classList.add("hidden");
+    if (scriptProgressBox) scriptProgressBox.classList.add("hidden");
+  }
+}
+
+tabMonitorBtn.addEventListener("click", () => activateTab("monitor"));
+tabScriptsBtn.addEventListener("click", () => activateTab("scripts"));
+
+if (tablistEl) {
+  tablistEl.addEventListener("keydown", (e) => {
+    const tabs = [tabMonitorBtn, tabScriptsBtn];
+    const currentIdx = tabs.indexOf(document.activeElement);
+    if (currentIdx === -1) return;
+    let nextIdx = currentIdx;
+    if (e.key === "ArrowRight") nextIdx = (currentIdx + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") nextIdx = (currentIdx - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") nextIdx = 0;
+    else if (e.key === "End") nextIdx = tabs.length - 1;
+    else return;
+    e.preventDefault();
+    activateTab(tabs[nextIdx].dataset.tab, { focusTab: true });
+  });
+}
+
+window.addEventListener("hashchange", () => {
+  activateTab(normalizeTabFromHash(window.location.hash), { updateHash: false });
+});
 
 // DOM Elements
 const brokerIndicator = document.getElementById("broker-indicator");
@@ -119,6 +214,8 @@ async function fetchNotifications() {
     const res = await fetch(`/api/notifications?${params.toString()}`);
     if (!res.ok) return;
     const data = await res.json();
+    const totalCount = typeof data.total === "number" ? data.total : (data.notifications || []).length;
+    if (tabBadgeMonitorEl) tabBadgeMonitorEl.textContent = String(totalCount);
     renderNotifications(data.notifications);
   } catch (err) {
     console.error("Failed to fetch notifications:", err);
@@ -379,21 +476,24 @@ btnReplaySelected.addEventListener("click", async () => {
       alert(`Replay error: ${err.detail || 'Failed'}`);
       return;
     }
-    isReplaying = true;
-    btnCancelReplay.disabled = false;
-    replayProgressBox.classList.remove("hidden");
-    replayProgressBar.style.width = "0%";
-    replayStatusMessage.textContent = "Replay started...";
+    setRunProgressState({ running: true, message: "Replay started...", percent: 0 });
   } catch (err) {
     alert(`Replay failed: ${err}`);
   }
 });
 
-btnCancelReplay.addEventListener("click", async () => {
+async function cancelActiveReplayOrScript() {
   await fetch("/api/replay/cancel", { method: "POST" });
   btnCancelReplay.disabled = true;
+  if (btnStopScriptRun) btnStopScriptRun.disabled = true;
   replayStatusMessage.textContent = "Cancelling replay...";
-});
+  if (scriptStatusMessage) scriptStatusMessage.textContent = "Cancelling...";
+}
+
+btnCancelReplay.addEventListener("click", cancelActiveReplayOrScript);
+if (btnStopScriptRun) {
+  btnStopScriptRun.addEventListener("click", cancelActiveReplayOrScript);
+}
 
 // Settings Modal
 btnOpenSettings.addEventListener("click", async () => {
@@ -479,20 +579,16 @@ function handleWsMessage(msg) {
     applyRecordingStatus(msg.data);
   } else if (msg.type === "replay_status" || msg.type === "script_status") {
     const data = msg.data;
-    replayProgressBox.classList.remove("hidden");
-    replayStatusMessage.textContent = data.message || data.status;
+    const isFinished = data.status === "completed" || data.status === "cancelled";
+    const pct = data.total && data.total > 0 ? Math.round((data.current / data.total) * 100) : undefined;
+    setRunProgressState({
+      running: !isFinished,
+      message: data.message || data.status,
+      percent: pct,
+    });
 
-    if (data.total && data.total > 0) {
-      const pct = Math.round((data.current / data.total) * 100);
-      replayProgressBar.style.width = `${pct}%`;
-    }
-
-    if (data.status === "completed" || data.status === "cancelled") {
-      isReplaying = false;
-      btnCancelReplay.disabled = true;
-      setTimeout(() => {
-        if (!isReplaying) replayProgressBox.classList.add("hidden");
-      }, 3000);
+    if (isFinished) {
+      setTimeout(hideRunProgressBoxesIfIdle, 3000);
     }
   }
 }
@@ -552,6 +648,7 @@ function updateScriptSequenceControls() {
 
 function renderScripts() {
   updateScriptSequenceControls();
+  if (tabBadgeScriptsEl) tabBadgeScriptsEl.textContent = String((savedScripts || []).length);
   if (!savedScripts || savedScripts.length === 0) {
     scriptsListEl.innerHTML = '<li class="empty-state">No action scripts saved yet</li>';
     return;
@@ -645,11 +742,11 @@ async function runSavedScript(name) {
       alert(`Run script error: ${err.detail || "Failed"}`);
       return;
     }
-    isReplaying = true;
-    btnCancelReplay.disabled = false;
-    replayProgressBox.classList.remove("hidden");
-    replayProgressBar.style.width = "0%";
-    replayStatusMessage.textContent = `Running script '${name}' on ${targets.length} device(s)...`;
+    setRunProgressState({
+      running: true,
+      message: `Running script '${name}' on ${targets.length} device(s)...`,
+      percent: 0,
+    });
   } catch (err) {
     alert(`Run script failed: ${err}`);
   }
@@ -704,6 +801,7 @@ btnSaveAsScript.addEventListener("click", async () => {
       return;
     }
     await fetchScripts();
+    activateTab("scripts");
   }
 
   await submitFromNotifications(false);
@@ -721,6 +819,7 @@ function defaultStepForType(type) {
 }
 
 function openScriptEditor(name = "", steps = []) {
+  activateTab("scripts");
   scriptEditorTitle.textContent = name ? `Edit Script: ${name}` : "New Action Script";
   editorScriptName.value = name;
   editorSteps = steps.length > 0 ? steps.map((s) => ({ ...s })) : [defaultStepForType("sendircode")];
@@ -852,11 +951,11 @@ btnRunScriptSequence.addEventListener("click", async () => {
       alert(`Run sequence error: ${data.detail || "Failed"}`);
       return;
     }
-    isReplaying = true;
-    btnCancelReplay.disabled = false;
-    replayProgressBox.classList.remove("hidden");
-    replayProgressBar.style.width = "0%";
-    replayStatusMessage.textContent = `Running ${selectedScriptSequence.length} script(s) on ${targets.length} device(s)...`;
+    setRunProgressState({
+      running: true,
+      message: `Running ${selectedScriptSequence.length} script(s) on ${targets.length} device(s)...`,
+      percent: 0,
+    });
   } catch (err) {
     alert(`Run sequence failed: ${err}`);
   }
@@ -921,6 +1020,7 @@ function applyRecordingStatus(status) {
     recordingBarEl.classList.add("is-recording");
     recordingIdleControls.classList.add("hidden");
     recordingActiveControls.classList.remove("hidden");
+    if (tabBadgeRecordingEl) tabBadgeRecordingEl.classList.remove("hidden");
     recDeviceIdEl.textContent = recordingState.device_id || "-";
     recStepCountEl.textContent = `${recordingState.step_count || 0} step(s)`;
     updateRecordingTimer();
@@ -931,6 +1031,7 @@ function applyRecordingStatus(status) {
     recordingBarEl.classList.remove("is-recording");
     recordingIdleControls.classList.remove("hidden");
     recordingActiveControls.classList.add("hidden");
+    if (tabBadgeRecordingEl) tabBadgeRecordingEl.classList.add("hidden");
     if (recordingTimerInterval) {
       clearInterval(recordingTimerInterval);
       recordingTimerInterval = null;
@@ -1008,6 +1109,7 @@ btnStopSaveRecording.addEventListener("click", async () => {
     }
     await fetchRecordingStatus();
     await fetchScripts();
+    activateTab("scripts");
   }
 
   try {
@@ -1049,6 +1151,7 @@ btnCancelRecording.addEventListener("click", async () => {
 });
 
 // Initial bootstrap
+activateTab(normalizeTabFromHash(window.location.hash));
 fetchDevices();
 fetchNotifications();
 fetchScripts();
